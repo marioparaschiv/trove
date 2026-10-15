@@ -10,7 +10,7 @@ use std::{
     fs, io,
     io::Write,
     ops::Range,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use sha2::{Digest, Sha256};
@@ -196,6 +196,32 @@ fn remove_conflict_copies_in(folder: &Path, errors: &mut Vec<StoreError>) {
             Err(source) => errors.push(StoreError::Read { path, source }),
         }
     }
+}
+
+/// The name a vector file has for its note (the hex SHA-256 of the note's path) when `path`, relative to a source, is
+/// one.
+pub fn vector_file_name<'a>(path: &'a Path, store_folder: &str) -> Option<&'a str> {
+    let mut parts = path.components().map(|component| match component {
+        Component::Normal(part) => part.to_str(),
+        _ => None,
+    });
+    let (Some(Some(store)), Some(Some(VECTORS_FOLDER)), Some(Some(shard)), Some(Some(file)), None) = (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) else {
+        return None;
+    };
+    let name = file.strip_suffix(EXTENSION)?.strip_suffix('.')?;
+    let is_hash = name.len() == 2 * HASH_LEN
+        && name
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+
+    (store == store_folder && is_hash && name.starts_with(shard) && shard.len() == 2)
+        .then_some(name)
 }
 
 /// Syncthing names a conflict copy `name.sync-conflict-<date>-<time>-<device>.ext`, Dropbox

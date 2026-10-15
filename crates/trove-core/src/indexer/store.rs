@@ -1,12 +1,21 @@
-use std::{path::Path, sync::Mutex};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
 use rusqlite::{OptionalExtension, Transaction};
 use sha2::{Digest, Sha256};
 
-use super::{IndexProblem, IndexReport, IndexerError};
+use super::{
+    IndexProblem, IndexReport, Indexer, IndexerError, NoteFile, neighbours::update_graph_edges,
+};
 use crate::{
+    config::Config,
+    embedder::{Embedder, vector_version},
     index::{self, Index},
-    sync_store::{StoredChunk, SyncStore, VectorFile},
+    sync_store::{StoredChunk, SyncStore, VectorFile, vector_file_name},
 };
 
 /// The note's vector file when it was made under `vector_version`. A file that can't be read is reported and treated
@@ -47,8 +56,13 @@ pub(super) fn chunks_for<'a>(
 
 /// Adds the file's vectors to the index. Vectors already there are kept.
 pub(super) fn import_vectors(tx: &Transaction<'_>, file: &VectorFile) -> rusqlite::Result<()> {
-    let mut insert =
-        tx.prepare("INSERT OR IGNORE INTO vectors (text_hash, vector) VALUES (?1, ?2)")?;
+    insert_vectors(tx, file, "INSERT OR IGNORE")
+}
+
+fn insert_vectors(tx: &Transaction<'_>, file: &VectorFile, insert: &str) -> rusqlite::Result<()> {
+    let mut insert = tx.prepare(&format!(
+        "{insert} INTO vectors (text_hash, vector) VALUES (?1, ?2)"
+    ))?;
     for chunk in &file.chunks {
         insert.execute((&chunk.text_hash, &chunk.vector))?;
     }
@@ -140,4 +154,155 @@ fn vector_file_from_index(
     };
 
     Ok(Some((source, relative, file)))
+}
+
+/// Imports the vector files at `paths`, as the watcher reported them, whose note is indexed and unchanged on disk,
+/// matches the file and has other vectors in the index. The file's vectors replace the index's, so both devices end up
+/// with the same bytes. Never loads the model. `files` in the report counts the notes imported.
+pub fn import_vector_files(
+    index: &Mutex<Index>,
+    embedder: &Arc<Embedder>,
+    config: &Config,
+    paths: &[PathBuf],
+) -> Result<IndexReport, IndexerError> {
+    let vector_version = vector_version(&config.model.sha256);
+    let sources = index::lock(index).sources()?;
+    let indexer = Indexer::standard(Arc::clone(embedder));
+    let mut report = IndexReport {
+        files: 0,
+        removed: 0,
+        embedded: 0,
+        problems: Vec::new(),
+    };
+
+    for source in &sources {
+        let root = Path::new(&source.path);
+        let names: HashSet<String> = paths
+            .iter()
+            .filter_map(|path| arrived_name(path, root, &config.store_folder))
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+
+        let store = SyncStore::new(root, &config.store_folder);
+        for note in notes_named(index, source.id, &names)? {
+            if import_note(
+                index,
+                &indexer,
+                root,
+                &store,
+                &note,
+                &vector_version,
+                &mut report,
+            )? {
+                report.files += 1;
+            }
+        }
+    }
+
+    if report.files > 0 {
+        update_graph_edges(index)?;
+    }
+
+    Ok(report)
+}
+
+/// The note hash `path` names when it is a vector file in `root`'s store folder. Watchers may report a resolved
+/// spelling of the source (macOS reports `/var/...` as `/private/var/...`).
+fn arrived_name(path: &Path, root: &Path, store_folder: &str) -> Option<String> {
+    let roots = [Some(root.to_path_buf()), fs::canonicalize(root).ok()];
+    let paths = [Some(path.to_path_buf()), fs::canonicalize(path).ok()];
+
+    roots.iter().flatten().find_map(|root| {
+        paths.iter().flatten().find_map(|path| {
+            let relative = path.strip_prefix(root).ok()?;
+            vector_file_name(relative, store_folder).map(str::to_owned)
+        })
+    })
+}
+
+struct IndexedNote {
+    id: i64,
+    path: String,
+    hash: Vec<u8>,
+    title: String,
+}
+
+/// The source's notes whose vector file names are among `names`.
+fn notes_named(
+    index: &Mutex<Index>,
+    source_id: i64,
+    names: &HashSet<String>,
+) -> Result<Vec<IndexedNote>, IndexerError> {
+    let index = index::lock(index);
+    let mut statement = index
+        .connection()
+        .prepare("SELECT id, path, hash, title FROM files WHERE source_id = ?1")?;
+    let notes = statement
+        .query_map([source_id], |row| {
+            Ok(IndexedNote {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                hash: row.get(2)?,
+                title: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(notes
+        .into_iter()
+        .filter(|note| names.contains(&hex::encode(Sha256::digest(&note.path))))
+        .collect())
+}
+
+/// Whether the note took its chunks and vectors from its vector file.
+fn import_note(
+    index: &Mutex<Index>,
+    indexer: &Indexer,
+    root: &Path,
+    store: &SyncStore,
+    note: &IndexedNote,
+    vector_version: &str,
+    report: &mut IndexReport,
+) -> Result<bool, IndexerError> {
+    let path = root.join(&note.path);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            report.problems.push(IndexProblem::new(&path, &error));
+            return Ok(false);
+        }
+    };
+    // A note changed since it was indexed is chunked by its own run, which reads the file then.
+    if Sha256::digest(&bytes).as_slice() != note.hash {
+        return Ok(false);
+    }
+    let text = String::from_utf8(bytes).expect("an indexed note's text is UTF-8");
+
+    let Some(file) = read_vector_file(store, &note.path, vector_version, report) else {
+        return Ok(false);
+    };
+    let Some(chunks) = chunks_for(&file, &text, &note.hash) else {
+        return Ok(false);
+    };
+    if vector_file_from_index(index, note.id)?.is_some_and(|(_, _, current)| current == file) {
+        return Ok(false);
+    }
+
+    let mut index = index::lock(index);
+    let tx = index.transaction()?;
+    insert_vectors(&tx, &file, "INSERT OR REPLACE")?;
+    indexer.process(
+        &tx,
+        &NoteFile {
+            id: note.id,
+            title: &note.title,
+            text: &text,
+            stored_chunks: Some(chunks),
+        },
+    )?;
+    tx.commit()?;
+
+    Ok(true)
 }

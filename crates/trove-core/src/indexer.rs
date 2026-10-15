@@ -22,6 +22,7 @@ pub(crate) use chunker::document_title;
 pub use embed::EmbedProgress;
 pub use links::LinkParser;
 pub use scan::{IndexMode, IndexProblem, IndexReport, index_sources};
+pub use store::import_vector_files;
 
 #[derive(Debug, Error)]
 pub enum IndexerError {

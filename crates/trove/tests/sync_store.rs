@@ -3,6 +3,7 @@ mod common;
 use std::{
     collections::BTreeMap,
     fs,
+    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -17,7 +18,10 @@ const PARAPHRASE: &str = "how to keep my bread culture alive";
 const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
 const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
 /// Where a vector file holds its `vector_version`: after the 8-byte magic and the 4-byte format version.
-const VECTOR_VERSION_BYTES: std::ops::Range<usize> = 12..76;
+const VECTOR_VERSION_BYTES: Range<usize> = 12..76;
+/// Where the records start: after the magic, format version, `vector_version`, content hash, dims and chunk count.
+const RECORDS_START: usize = 116;
+const OTHER_NOTE: &str = "Engineering/Retry backoff.md";
 
 /// Every file in the store folder by its path inside it.
 fn store_files(store: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
@@ -220,4 +224,81 @@ fn the_store_folder_name_is_configurable_and_never_indexed() {
     assert!(!vault.path().join(STORE_FOLDER).exists());
     let vector_files = store_files(&store.join("vectors"));
     assert_eq!(vector_files.len() as u64, notes, "{vector_files:?}");
+}
+
+/// The byte ranges of each record's vector in a vector file.
+fn vector_ranges(file: &[u8]) -> Vec<Range<usize>> {
+    let read_u32 = |at: usize| u32::from_le_bytes(file[at..at + 4].try_into().unwrap()) as usize;
+    let dims = read_u32(RECORDS_START - 8);
+    let count = read_u32(RECORDS_START - 4);
+
+    let mut ranges = Vec::new();
+    let mut at = RECORDS_START;
+    for _ in 0..count {
+        let heading_len = read_u32(at + 32);
+        let start = at + 32 + 4 + heading_len + 16;
+        ranges.push(start..start + dims * 2);
+        at = start + dims * 2;
+    }
+    assert_eq!(at, file.len());
+
+    ranges
+}
+
+#[test]
+fn a_running_service_imports_a_vector_file_arriving_from_another_device() {
+    let vault = vault_copy();
+    indexed(vault.path());
+    let data_dir = data_dir_with_model();
+    fs::write(
+        data_dir.path().join("config.toml"),
+        "index_debounce = \"200ms\"\n",
+    )
+    .unwrap();
+    run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
+    let serve = Serve::start_in(data_dir);
+    let mut events = serve.events();
+    if status(&serve)["indexing"]["busy"] == true {
+        events.until("index_finished");
+    }
+    let search = |query: &str| {
+        let (status, response) = serve.call("POST", "/search", Some(&json!({ "query": query })));
+        assert_eq!(status, 200, "{response}");
+        response
+    };
+    assert_eq!(result_paths(&search(PARAPHRASE))[0], PARAPHRASE_NOTE);
+
+    // Another device's file for the note: the same text, with the other note's vectors.
+    let path = vector_file(vault.path(), PARAPHRASE_NOTE);
+    let mut arriving = fs::read(&path).unwrap();
+    let other = fs::read(vector_file(vault.path(), OTHER_NOTE)).unwrap();
+    let (targets, sources) = (vector_ranges(&arriving), vector_ranges(&other));
+    assert!(
+        targets.len() >= sources.len(),
+        "every vector of the other note is copied"
+    );
+    for (place, target) in targets.into_iter().enumerate() {
+        let source = sources[place % sources.len()].clone();
+        arriving[target].copy_from_slice(&other[source]);
+    }
+    let mut events = serve.events();
+    fs::write(&path, &arriving).unwrap();
+
+    assert_eq!(
+        events.until("vectors_imported").last().unwrap(),
+        &json!({
+            "type": "vectors_imported",
+            "report": { "files": 1, "removed": 0, "embedded": 0, "problems": [] },
+        })
+    );
+    assert_eq!(status(&serve)["indexing"]["embedded"], 0);
+    // The note now has the other note's meaning.
+    let response = search(PARAPHRASE);
+    assert!(
+        !result_paths(&response).contains(&PARAPHRASE_NOTE),
+        "{response}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), arriving, "kept as it arrived");
+
+    serve.stop();
 }
