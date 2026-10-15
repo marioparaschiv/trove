@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { after, type TestContext, test } from "node:test";
+import { after, before, describe, type TestContext, test } from "node:test";
 import { connect, readRuntimeFile } from "@trove/client";
 import {
   assetUrl,
@@ -95,43 +95,53 @@ function packageDebugBuild(dist: string): {
   return { pin: { ...PIN, assets: { [platform]: asset } }, asset, archive };
 }
 
-const dist = mkdtempSync(join(tmpdir(), "trove-dist-"));
-after(() => rmSync(dist, { recursive: true, force: true }));
-const release = packageDebugBuild(dist);
-/** Stands in for the download from GitHub. */
-const download = async () => new Uint8Array(readFileSync(release.archive)).buffer;
+describe("installing a release", () => {
+  const dist = mkdtempSync(join(tmpdir(), "trove-dist-"));
+  after(() => rmSync(dist, { recursive: true, force: true }));
+  let release: ReturnType<typeof packageDebugBuild>;
+  before(() => {
+    release = packageDebugBuild(dist);
+  });
+  /** Stands in for the download from GitHub. */
+  const download = async () => new Uint8Array(readFileSync(release.archive)).buffer;
 
-test("installs the pinned release, which then starts", async (t) => {
-  const folder = tempDir(t, "trove-bin-");
-  const dataDir = mkdtempSync(join(tmpdir(), "trove-data-"));
-  t.after(() => {
-    const runtime = readRuntimeFile(dataDir);
-    if (runtime !== undefined) {
-      process.kill(runtime.pid);
-    }
-    rmSync(dataDir, { recursive: true, force: true, maxRetries: 20 });
+  test("installs the pinned release, which then starts", async (t) => {
+    const folder = tempDir(t, "trove-bin-");
+    const dataDir = mkdtempSync(join(tmpdir(), "trove-data-"));
+    t.after(() => {
+      const runtime = readRuntimeFile(dataDir);
+      if (runtime !== undefined) {
+        process.kill(runtime.pid);
+      }
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 20 });
+    });
+
+    const binary = await installBinary({
+      ...release,
+      folder,
+      platform: process.platform,
+      download,
+    });
+
+    assert.equal(binary, binaryPath(release.pin, folder, process.platform));
+    assert.deepEqual(readdirSync(folder), [release.pin.version]);
+    const { client } = await connect({ binary, dataDir });
+    const status = await client.GET("/status");
+    assert.equal(status.response.status, 200);
+    assert.equal(status.data?.version, release.pin.version);
   });
 
-  const binary = await installBinary({ ...release, folder, platform: process.platform, download });
+  test("rejects an archive with the wrong hash and installs nothing", async (t) => {
+    const folder = tempDir(t, "trove-bin-");
+    const asset = { ...release.asset, sha256: "0".repeat(64) };
 
-  assert.equal(binary, binaryPath(release.pin, folder, process.platform));
-  assert.deepEqual(readdirSync(folder), [release.pin.version]);
-  const { client } = await connect({ binary, dataDir });
-  const status = await client.GET("/status");
-  assert.equal(status.response.status, 200);
-  assert.equal(status.data?.version, release.pin.version);
-});
-
-test("rejects an archive with the wrong hash and installs nothing", async (t) => {
-  const folder = tempDir(t, "trove-bin-");
-  const asset = { ...release.asset, sha256: "0".repeat(64) };
-
-  await assert.rejects(
-    installBinary({ ...release, asset, folder, platform: process.platform, download }),
-    {
-      message: `${asset.file} has SHA-256 ${release.asset.sha256}, expected ${asset.sha256}; it was not installed`,
-    },
-  );
-  assert.deepEqual(readdirSync(folder), []);
-  assert.equal(existsSync(binaryPath(release.pin, folder, process.platform)), false);
+    await assert.rejects(
+      installBinary({ ...release, asset, folder, platform: process.platform, download }),
+      {
+        message: `${asset.file} has SHA-256 ${release.asset.sha256}, expected ${asset.sha256}; it was not installed`,
+      },
+    );
+    assert.deepEqual(readdirSync(folder), []);
+    assert.equal(existsSync(binaryPath(release.pin, folder, process.platform)), false);
+  });
 });
