@@ -1,0 +1,21 @@
+[package]
+name = "trove-llama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+links = "llama"
+
+[features]
+# Regenerates src/bindings.rs from the pinned llama.h (needs libclang); only when bumping the llama.cpp tag.
+generate-bindings = ["dep:bindgen"]
+
+[dependencies]
+thiserror.workspace = true
+
+[build-dependencies]
+bindgen = { workspace = true, optional = true }
+cmake.workspace = true
+
+[lints]
+workspace = true

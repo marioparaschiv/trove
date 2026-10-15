@@ -75,7 +75,7 @@ impl ModelFile {
     }
 
     /// The layout `hf download` writes: `models--{owner}--{name}/snapshots/{revision}/{file}`.
-    fn path_in_hf_cache(&self, hub: &Path) -> PathBuf {
+    pub fn path_in_hf_cache(&self, hub: &Path) -> PathBuf {
         hub.join(format!("models--{}", self.repo.replace('/', "--")))
             .join("snapshots")
             .join(&self.revision)
@@ -244,7 +244,7 @@ fn hf_cache_copy(model: &ModelFile) -> Result<Option<PathBuf>, SetupError> {
     Ok(passes_check(&cached, model)?.then_some(cached))
 }
 
-fn hf_hub_cache() -> Option<PathBuf> {
+pub fn hf_hub_cache() -> Option<PathBuf> {
     if let Some(hub) = std::env::var_os("HF_HUB_CACHE") {
         return Some(PathBuf::from(hub));
     }

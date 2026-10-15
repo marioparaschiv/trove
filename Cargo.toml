@@ -10,8 +10,11 @@ publish = false
 
 [workspace.dependencies]
 trove-core = { path = "crates/trove-core" }
+trove-llama = { path = "crates/trove-llama" }
 anyhow = "1.0.104"
+bindgen = "0.72.1"
 clap = { version = "4.6.7", features = ["derive"] }
+cmake = "0.1.58"
 directories = "6.0.0"
 hex = "0.4.3"
 humantime = "2.4.0"
