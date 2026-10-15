@@ -90,7 +90,11 @@ jobs:
           mkdir -p "$snapshot"
           curl --fail --location --retry 5 --output "$snapshot/$FILE.partial" \
             "https://huggingface.co/$REPO/resolve/$REVISION/$FILE"
-          echo "$SHA256  $snapshot/$FILE.partial" | shasum --algorithm 256 --check
+          actual=$(openssl dgst -sha256 -r "$snapshot/$FILE.partial" | cut -d ' ' -f 1)
+          if [ "$actual" != "$SHA256" ]; then
+            echo "::error::$FILE has SHA-256 $actual, expected $SHA256"
+            exit 1
+          fi
           mv "$snapshot/$FILE.partial" "$snapshot/$FILE"
 
       - name: Clippy
