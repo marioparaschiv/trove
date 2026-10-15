@@ -1,4 +1,14 @@
+mod collapse;
+mod meaning;
+mod request;
+
 use thiserror::Error;
+
+use crate::embedder::EmbedderError;
+
+pub use collapse::CollapseToNotes;
+pub use meaning::Meaning;
+pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
 
 pub struct Query {
     pub text: String,
@@ -12,8 +22,14 @@ pub struct Candidate {
 
 #[derive(Debug, Error)]
 pub enum SearchError {
+    #[error("the query is empty")]
+    EmptyQuery,
+    #[error("the limit must be at least 1")]
+    ZeroLimit,
     #[error(transparent)]
     Index(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Embedder(#[from] EmbedderError),
 }
 
 /// One step of search. Each stage gets the previous stage's candidates and returns its own.
@@ -23,12 +39,12 @@ pub trait Stage: Send + Sync {
 }
 
 /// Runs its stages in order, starting from no candidates.
-pub struct Pipeline {
-    stages: Vec<Box<dyn Stage>>,
+pub struct Pipeline<'a> {
+    stages: Vec<Box<dyn Stage + 'a>>,
 }
 
-impl Pipeline {
-    pub fn new(stages: Vec<Box<dyn Stage>>) -> Self {
+impl<'a> Pipeline<'a> {
+    pub fn new(stages: Vec<Box<dyn Stage + 'a>>) -> Self {
         Self { stages }
     }
 

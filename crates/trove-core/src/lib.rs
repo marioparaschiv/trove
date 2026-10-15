@@ -1,6 +1,7 @@
 pub mod config;
 pub mod data_dir;
 pub mod embedder;
+mod error;
 pub mod http;
 pub mod index;
 pub mod indexer;

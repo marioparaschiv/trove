@@ -23,6 +23,7 @@ CREATE TABLE files (
 
 -- heading_path joins the headings with '\n', which a heading can never contain.
 -- span_start and span_end are byte offsets of the chunk text in the file.
+-- token_count is the length of the chunk's document prompt (title and text) in model tokens.
 -- text_hash is the SHA-256 of the chunk text and keys its vector.
 CREATE TABLE chunks (
     id INTEGER PRIMARY KEY,

@@ -1,12 +1,15 @@
-use std::{error::Error, fmt::Write};
+use std::error::Error;
 
 use axum::{
     Json,
+    extract::rejection::{JsonRejection, QueryRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+use crate::error::full_message;
 
 /// The body of every error response.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -27,16 +30,26 @@ impl ApiError {
         }
     }
 
-    /// A 500 whose message includes the whole chain of causes.
-    pub(crate) fn internal(error: &dyn Error) -> Self {
-        let mut message = error.to_string();
-        let mut source = error.source();
-        while let Some(cause) = source {
-            write!(message, ": {cause}").expect("writing to a String can't fail");
-            source = cause.source();
-        }
+    /// A response whose message includes the whole chain of causes.
+    pub(crate) fn from_error(status: StatusCode, error: &dyn Error) -> Self {
+        Self::new(status, full_message(error))
+    }
 
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    pub(crate) fn internal(error: &dyn Error) -> Self {
+        Self::from_error(StatusCode::INTERNAL_SERVER_ERROR, error)
+    }
+}
+
+// Every malformed request is a 400 with an `ErrorBody`, so clients handle one shape.
+impl From<JsonRejection> for ApiError {
+    fn from(rejection: JsonRejection) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, rejection.body_text())
+    }
+}
+
+impl From<QueryRejection> for ApiError {
+    fn from(rejection: QueryRejection) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, rejection.body_text())
     }
 }
 

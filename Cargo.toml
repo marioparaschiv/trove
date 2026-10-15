@@ -12,18 +12,20 @@ publish = false
 trove-core = { path = "crates/trove-core" }
 trove-llama = { path = "crates/trove-llama" }
 anyhow = "1.0.104"
-axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
 bindgen = "0.72.1"
 clap = { version = "4.6.7", features = ["derive"] }
 cmake = "0.1.58"
 directories = "6.0.0"
 futures-util = { version = "0.3.34", default-features = false }
 getrandom = "0.4.3"
+half = "2.7.1"
 hex = "0.4.3"
 humantime = "2.4.0"
 rusqlite = { version = "0.40.2", features = ["bundled", "fallible_uint"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+serde-saphyr = "2.0.0"
 sha2 = "0.11.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
