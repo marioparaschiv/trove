@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, hash_map::Entry};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::Connection;
 
@@ -11,6 +11,14 @@ const SEMANTIC_FLOOR: f32 = 0.75;
 /// Joins each section to its note.
 const MEMBERSHIP_WEIGHT: f32 = 1.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Node {
+    /// A note, by its file id.
+    Note(i64),
+    Section(Section),
+    Tag,
+}
+
 /// A section node: the chunk it stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Section {
@@ -22,8 +30,9 @@ pub(crate) struct Section {
 /// each section to its note, and co-citation and coupling between notes.
 pub(crate) struct VaultGraph {
     pub(crate) graph: Graph,
+    /// What each node of `graph` stands for.
+    pub(crate) nodes: Vec<Node>,
     chunk_nodes: HashMap<i64, usize>,
-    sections: HashMap<usize, Section>,
 }
 
 impl VaultGraph {
@@ -31,11 +40,11 @@ impl VaultGraph {
         let mut builder = Builder {
             conn,
             graph: Graph::default(),
+            nodes: Vec::new(),
             notes: HashMap::new(),
             paths: NotePaths::default(),
-            nodes: HashMap::new(),
+            keyed: HashMap::new(),
             chunk_nodes: HashMap::new(),
-            sections: HashMap::new(),
             headings: HashMap::new(),
         };
         builder.add_notes()?;
@@ -45,18 +54,13 @@ impl VaultGraph {
 
         Ok(Self {
             graph: builder.graph,
+            nodes: builder.nodes,
             chunk_nodes: builder.chunk_nodes,
-            sections: builder.sections,
         })
     }
 
     pub(crate) fn chunk_node(&self, chunk_id: i64) -> Option<usize> {
         self.chunk_nodes.get(&chunk_id).copied()
-    }
-
-    /// The chunk a node stands for, when it is a section.
-    pub(crate) fn section(&self, node: usize) -> Option<Section> {
-        self.sections.get(&node).copied()
     }
 }
 
@@ -69,17 +73,22 @@ struct Note {
 struct Builder<'a> {
     conn: &'a Connection,
     graph: Graph,
+    nodes: Vec<Node>,
     notes: HashMap<i64, Note>,
     paths: NotePaths,
-    /// Section and tag nodes.
-    nodes: HashMap<NodeKey, usize>,
+    /// Section and tag nodes by key.
+    keyed: HashMap<NodeKey, usize>,
     chunk_nodes: HashMap<i64, usize>,
-    sections: HashMap<usize, Section>,
     /// Each note's chunks in order, with their heading paths.
     headings: HashMap<i64, Vec<(i64, String)>>,
 }
 
 impl Builder<'_> {
+    fn add_node(&mut self, node: Node) -> usize {
+        self.nodes.push(node);
+        self.graph.add_node()
+    }
+
     fn add_notes(&mut self) -> rusqlite::Result<()> {
         let mut statement = self.conn.prepare("SELECT id, source_id, path FROM files")?;
         let mut rows = statement.query([])?;
@@ -87,7 +96,7 @@ impl Builder<'_> {
             let (file_id, source_id, path): (i64, i64, String) =
                 (row.get(0)?, row.get(1)?, row.get(2)?);
             self.paths.insert(source_id, &path, file_id);
-            let node = self.graph.add_node();
+            let node = self.add_node(Node::Note(file_id));
             self.notes.insert(
                 file_id,
                 Note {
@@ -112,14 +121,13 @@ impl Builder<'_> {
             let key = NodeKey::section(file_id, row.get_ref(3)?.as_blob()?);
 
             // Chunks of one note with the same text are one section.
-            let node = match self.nodes.entry(key) {
-                Entry::Occupied(entry) => *entry.get(),
-                Entry::Vacant(entry) => {
-                    let node = self.graph.add_node();
-                    entry.insert(node);
+            let node = match self.keyed.get(&key) {
+                Some(&node) => node,
+                None => {
+                    let node = self.add_node(Node::Section(Section { chunk_id, file_id }));
+                    self.keyed.insert(key, node);
                     self.graph
                         .add_edge(self.notes[&file_id].node, node, MEMBERSHIP_WEIGHT);
-                    self.sections.insert(node, Section { chunk_id, file_id });
                     node
                 }
             };
@@ -189,13 +197,15 @@ impl Builder<'_> {
     fn node(&mut self, key: &NodeKey) -> Option<usize> {
         match key {
             NodeKey::Note(file_id) => self.notes.get(file_id).map(|note| note.node),
-            NodeKey::Section { .. } => self.nodes.get(key).copied(),
-            NodeKey::Tag(_) => Some(
-                *self
-                    .nodes
-                    .entry(key.clone())
-                    .or_insert_with(|| self.graph.add_node()),
-            ),
+            NodeKey::Section { .. } => self.keyed.get(key).copied(),
+            NodeKey::Tag(_) => Some(match self.keyed.get(key) {
+                Some(&node) => node,
+                None => {
+                    let node = self.add_node(Node::Tag);
+                    self.keyed.insert(key.clone(), node);
+                    node
+                }
+            }),
             NodeKey::Link(_) => None,
         }
     }

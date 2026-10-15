@@ -1,6 +1,6 @@
 # Bouldering
 
-Short climbing problems over crash pads, no rope.
+Short climbing problems over crash pads, no rope, for #rainy-day afternoons at the gym.
 
 ## Footwork
 
@@ -8,9 +8,4 @@ Place the toe precisely on each hold and watch it until the weight is on it. Qui
 
 ## Falling
 
-Land on both feet with bent knees and roll backwards onto the pad instead of reaching out with a hand. A spotter guides the shoulders towards the pad, not the legs.
-
-## See also
-
-- [[Pottery glazes#^cone-six]]
-- #rainy-day
+Land on both feet with bent knees and roll backwards onto the pad instead of reaching out with a hand. A spotter guides the shoulders towards the pad, not the legs. The old chalk bucket now dries [[Pottery glazes#^cone-six|glaze test tiles]].

@@ -3,7 +3,7 @@ mod resolve;
 mod vault;
 
 pub(crate) use node_key::{EdgeKind, NodeKey};
-pub(crate) use vault::VaultGraph;
+pub(crate) use vault::{Node, VaultGraph};
 
 /// Chance that a step of the walk jumps back to the seeds.
 pub const RESTART: f32 = 0.15;
@@ -17,12 +17,6 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn new(nodes: usize) -> Self {
-        Self {
-            neighbours: vec![Vec::new(); nodes],
-        }
-    }
-
     pub fn len(&self) -> usize {
         self.neighbours.len()
     }
