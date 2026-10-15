@@ -50,6 +50,21 @@ fn status(serve: &Serve) -> Value {
     body
 }
 
+/// The notes and chunks in the index, as `trove status` prints them.
+fn index_size(data_dir: &Path) -> (u64, u64) {
+    let status = run(data_dir, &["status"]);
+    let line = status
+        .lines()
+        .find_map(|line| line.strip_prefix("index: "))
+        .unwrap();
+    let (files, chunks) = line
+        .strip_suffix(" chunks")
+        .and_then(|line| line.split_once(" files, "))
+        .unwrap();
+
+    (files.parse().unwrap(), chunks.parse().unwrap())
+}
+
 /// Starts the service with a short debounce and returns once its startup index run is done, so a later subscription
 /// to the events stream sees none of that run's events.
 fn serve_indexed(data_dir: TempDir) -> Serve {
@@ -90,9 +105,10 @@ fn an_edited_section_is_embedded_alone_and_found_after_the_debounce() {
     assert_eq!(status(&serve)["indexing"]["embedded"], 1);
     assert_finds_the_edited_section(&search(&serve, BEEKEEPING_QUERY));
 
+    let notes = &status(&serve)["index"]["files"];
     assert_eq!(
         run(serve.data_dir.path(), &["index", "--full"]),
-        "indexed 9 notes (0 removed), embedded 0 chunks\n"
+        format!("indexed {notes} notes (0 removed), embedded 0 chunks\n")
     );
     for body in [json!({ "mode": "everything" }), json!({ "full": true })] {
         let (status, error) = serve.call("POST", "/index", Some(&body));
@@ -153,6 +169,7 @@ fn index_modes_choose_what_is_read_and_embedded() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
     let index = |args: &[&str]| run(data_dir.path(), &[&["index"], args].concat());
+    let (notes, chunks) = index_size(data_dir.path());
 
     assert_eq!(
         index(&[]),
@@ -173,16 +190,16 @@ fn index_modes_choose_what_is_read_and_embedded() {
 
     assert_eq!(
         index(&["--full"]),
-        "indexed 9 notes (0 removed), embedded 0 chunks\n"
+        format!("indexed {notes} notes (0 removed), embedded 0 chunks\n")
     );
     edit_one_section(vault.path());
     assert_eq!(
         index(&["--full"]),
-        "indexed 9 notes (0 removed), embedded 1 chunks\n"
+        format!("indexed {notes} notes (0 removed), embedded 1 chunks\n")
     );
     assert_eq!(
         index(&["--reembed"]),
-        "indexed 9 notes (0 removed), embedded 26 chunks\n"
+        format!("indexed {notes} notes (0 removed), embedded {chunks} chunks\n")
     );
 
     fs::remove_file(vault.path().join(EDITED_NOTE)).unwrap();
