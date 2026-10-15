@@ -86,9 +86,9 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-fn reference_vectors() -> BTreeMap<String, Vec<f32>> {
+fn reference_vectors(embedder: &Embedder) -> BTreeMap<String, Vec<f32>> {
     let inputs = reference_inputs();
-    let made = EMBEDDER
+    let made = embedder
         .embed(&inputs.iter().map(|(_, input)| *input).collect::<Vec<_>>())
         .unwrap();
 
@@ -103,7 +103,7 @@ fn reference_vectors() -> BTreeMap<String, Vec<f32>> {
 /// `TROVE_WRITE_REFERENCE=1 cargo test -p trove-core --test embedder`.
 #[test]
 fn fixed_texts_match_the_committed_reference_vectors() {
-    let made = reference_vectors();
+    let made = reference_vectors(&EMBEDDER);
     let version = vector_version(MODEL_SHA256);
     let stored: Option<Reference> = fs::read_to_string(REFERENCE_FILE)
         .ok()
@@ -155,9 +155,32 @@ fn fixed_texts_match_the_committed_reference_vectors() {
     }
 }
 
+/// Metal and CPU vectors share one index only while they agree; otherwise the backend has to go into `vector_version`.
+#[cfg(target_os = "macos")]
+#[test]
+fn metal_and_cpu_vectors_for_the_reference_texts_agree() {
+    use trove_core::embedder::{Devices, has_gpu};
+
+    assert!(has_gpu().unwrap(), "llama.cpp found no Metal device");
+    let metal = reference_vectors(&EMBEDDER);
+    let cpu = reference_vectors(&Embedder::on_devices(
+        model_path(),
+        Duration::from_secs(180),
+        Devices::Cpu,
+    ));
+
+    for (name, vector) in &metal {
+        let similarity = cosine(vector, &cpu[name]);
+        assert!(
+            similarity >= AGREEMENT,
+            "{name}: Metal and CPU vectors at cosine {similarity}"
+        );
+    }
+}
+
 #[test]
 fn vectors_are_unit_length() {
-    for (name, vector) in reference_vectors() {
+    for (name, vector) in reference_vectors(&EMBEDDER) {
         assert_eq!(vector.len(), DIMS, "{name}");
         let norm = cosine(&vector, &vector).sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "{name}: norm {norm}");

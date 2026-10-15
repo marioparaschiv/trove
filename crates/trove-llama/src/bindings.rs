@@ -219,8 +219,20 @@ pub struct ggml_backend_device {
     _unused: [u8; 0],
 }
 pub type ggml_backend_dev_t = *mut ggml_backend_device;
+pub const GGML_BACKEND_DEVICE_TYPE_CPU: ggml_backend_dev_type = 0;
+pub const GGML_BACKEND_DEVICE_TYPE_GPU: ggml_backend_dev_type = 1;
+pub const GGML_BACKEND_DEVICE_TYPE_IGPU: ggml_backend_dev_type = 2;
+pub const GGML_BACKEND_DEVICE_TYPE_ACCEL: ggml_backend_dev_type = 3;
+pub const GGML_BACKEND_DEVICE_TYPE_META: ggml_backend_dev_type = 4;
+pub type ggml_backend_dev_type = ::std::os::raw::c_int;
+unsafe extern "C" {
+    pub fn ggml_backend_dev_type(device: ggml_backend_dev_t) -> ggml_backend_dev_type;
+}
 unsafe extern "C" {
     pub fn ggml_backend_dev_count() -> usize;
+}
+unsafe extern "C" {
+    pub fn ggml_backend_dev_get(index: usize) -> ggml_backend_dev_t;
 }
 unsafe extern "C" {
     pub fn ggml_backend_load_all();

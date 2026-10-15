@@ -216,6 +216,8 @@ fn runtime_libraries(install: &Path) -> Vec<PathBuf> {
 #[cfg(feature = "generate-bindings")]
 const BOUND_FUNCTIONS: &[&str] = &[
     "ggml_backend_dev_count",
+    "ggml_backend_dev_get",
+    "ggml_backend_dev_type",
     "ggml_backend_load_all",
     "llama_backend_init",
     "llama_batch_free",
