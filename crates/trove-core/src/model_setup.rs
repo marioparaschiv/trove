@@ -22,7 +22,7 @@ use ureq::{
 };
 use utoipa::ToSchema;
 
-use crate::{config::Config, data_dir::DataDir};
+use crate::{config::Config, data_dir::DataDir, error::full_message};
 
 pub const MODEL_REPO: &str = "ggml-org/embeddinggemma-2-GGUF";
 pub const MODEL_REVISION: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
@@ -184,7 +184,7 @@ pub fn setup(
     match &result {
         Ok(path) => emit(Event::Done { path: path.clone() }),
         Err(error) => emit(Event::Error {
-            message: describe(error),
+            message: full_message(error),
         }),
     }
 
@@ -348,7 +348,7 @@ fn download(
 
                 let delay = backoff(retry_delay, failures);
                 emit(Event::Retry {
-                    message: describe(&error),
+                    message: full_message(&error),
                     seconds: delay.as_secs_f64(),
                 });
                 thread::sleep(delay);
@@ -651,17 +651,4 @@ fn io_error(action: &'static str, path: &Path, source: io::Error) -> SetupError 
         path: path.to_path_buf(),
         source,
     }
-}
-
-fn describe(error: &dyn std::error::Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-
-    while let Some(error) = source {
-        message.push_str(": ");
-        message.push_str(&error.to_string());
-        source = error.source();
-    }
-
-    message
 }
