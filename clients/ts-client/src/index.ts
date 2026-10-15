@@ -46,6 +46,17 @@ export async function connect({
   };
 }
 
+/** The error a failed request gives, with the status and the server's message when it sent one. */
+export function failure(
+  action: string,
+  response: Response,
+  error: Schemas["ErrorBody"] | undefined,
+): Error {
+  return new Error(
+    `${action} failed with ${response.status}: ${error?.error ?? response.statusText}`,
+  );
+}
+
 /** The data folder the `trove` binary uses: `TROVE_DATA_DIR`, else the OS's local data folder. */
 export function defaultDataDir(): string {
   const fromEnv = process.env.TROVE_DATA_DIR;

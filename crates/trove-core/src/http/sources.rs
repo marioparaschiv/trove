@@ -77,6 +77,7 @@ pub(super) async fn add(
     request: Result<Json<SourcePath>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Source>), ApiError> {
     let Json(SourcePath { path }) = request?;
+    let _turn = state.indexing.turn.lock().await;
     let source = with_index(&state, move |index| index.add_source(&PathBuf::from(path))).await?;
     state.watcher.watch(&source.path);
 
@@ -101,6 +102,7 @@ pub(super) async fn remove(
     request: Result<Query<SourcePath>, QueryRejection>,
 ) -> Result<Json<Source>, ApiError> {
     let Query(SourcePath { path }) = request?;
+    let _turn = state.indexing.turn.lock().await;
     let source = with_index(&state, move |index| {
         index.remove_source(&PathBuf::from(path))
     })

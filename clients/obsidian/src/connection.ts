@@ -1,4 +1,4 @@
-import { connect, type TroveClient } from "@trove/client";
+import { connect, failure, type TroveClient } from "@trove/client";
 import { stripHeadingForLink } from "obsidian";
 import { obsidianFetch } from "./obsidian-fetch.ts";
 import { isSameFolder, type TroveResult } from "./suggestions.ts";
@@ -26,16 +26,6 @@ export async function vaultSource(
 /** A link to a Trove result's note, at its heading. */
 export function noteLink({ path, heading_path }: TroveResult): string {
   return [path, ...heading_path.map(stripHeadingForLink)].join("#");
-}
-
-export function failure(
-  action: string,
-  response: Response,
-  error: { error: string } | undefined,
-): Error {
-  return new Error(
-    `${action} failed with ${response.status}: ${error?.error ?? response.statusText}`,
-  );
 }
 
 export function message(error: unknown): string {

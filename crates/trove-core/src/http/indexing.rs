@@ -41,7 +41,8 @@ pub struct IndexingStatus {
 /// Index runs of the service, which take turns.
 #[derive(Default)]
 pub(super) struct Indexing {
-    turn: tokio::sync::Mutex<()>,
+    /// Held by index runs, imports and source changes, which would break a run that read the sources before them.
+    pub(super) turn: tokio::sync::Mutex<()>,
     jobs: AtomicUsize,
     embedded: AtomicU64,
 }
