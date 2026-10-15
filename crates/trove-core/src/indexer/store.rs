@@ -56,13 +56,19 @@ pub(super) fn chunks_for<'a>(
 
 /// Adds the file's vectors to the index. Vectors already there are kept.
 pub(super) fn import_vectors(tx: &Transaction<'_>, file: &VectorFile) -> rusqlite::Result<()> {
-    insert_vectors(tx, file, "INSERT OR IGNORE")
+    insert_vectors(
+        tx,
+        file,
+        "INSERT OR IGNORE INTO vectors (text_hash, vector) VALUES (?1, ?2)",
+    )
 }
 
-fn insert_vectors(tx: &Transaction<'_>, file: &VectorFile, insert: &str) -> rusqlite::Result<()> {
-    let mut insert = tx.prepare(&format!(
-        "{insert} INTO vectors (text_hash, vector) VALUES (?1, ?2)"
-    ))?;
+fn insert_vectors(
+    tx: &Transaction<'_>,
+    file: &VectorFile,
+    statement: &'static str,
+) -> rusqlite::Result<()> {
+    let mut insert = tx.prepare(statement)?;
     for chunk in &file.chunks {
         insert.execute((&chunk.text_hash, &chunk.vector))?;
     }
@@ -168,12 +174,7 @@ pub fn import_vector_files(
     let vector_version = vector_version(&config.model.sha256);
     let sources = index::lock(index).sources()?;
     let indexer = Indexer::standard(Arc::clone(embedder));
-    let mut report = IndexReport {
-        files: 0,
-        removed: 0,
-        embedded: 0,
-        problems: Vec::new(),
-    };
+    let mut report = IndexReport::default();
 
     for source in &sources {
         let root = Path::new(&source.path);
@@ -292,7 +293,11 @@ fn import_note(
 
     let mut index = index::lock(index);
     let tx = index.transaction()?;
-    insert_vectors(&tx, &file, "INSERT OR REPLACE")?;
+    insert_vectors(
+        &tx,
+        &file,
+        "INSERT OR REPLACE INTO vectors (text_hash, vector) VALUES (?1, ?2)",
+    )?;
     indexer.process(
         &tx,
         &NoteFile {

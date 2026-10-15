@@ -41,7 +41,7 @@ pub enum IndexMode {
 }
 
 /// What an index run did.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct IndexReport {
     /// Notes read and chunked.
     pub files: u64,
@@ -109,12 +109,7 @@ pub fn index_sources(
     };
 
     let indexer = Indexer::standard(Arc::clone(embedder));
-    let mut report = IndexReport {
-        files: 0,
-        removed: 0,
-        embedded: 0,
-        problems: Vec::new(),
-    };
+    let mut report = IndexReport::default();
 
     let mut written = Vec::new();
     for source in &sources {

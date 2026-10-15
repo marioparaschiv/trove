@@ -5,7 +5,7 @@ use rusqlite::Transaction;
 use super::{FileProcessor, IndexerError, NoteFile, chunker::Fence, frontmatter::Frontmatter};
 use crate::graph::{EdgeKind, NodeKey};
 
-/// Starting weights from the spec; the eval decides the final ones.
+/// Weights from spec "Graph".
 const LINK_WEIGHT: f32 = 1.0;
 const PROPERTY_LINK_WEIGHT: f32 = 1.0;
 const TAG_WEIGHT: f32 = 0.5;
