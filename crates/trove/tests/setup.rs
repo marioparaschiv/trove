@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
     sync::{Arc, Mutex},
     thread,
 };
@@ -32,6 +32,8 @@ enum Reply {
     Full,
     /// Promises the whole body, sends `CUT_AT` bytes of it, then hangs up.
     Cut,
+    /// Promises the whole body, sends `CUT_AT` bytes of it, then keeps the connection open without sending more.
+    Stall,
     Corrupt,
 }
 
@@ -55,6 +57,7 @@ impl Server {
         thread::spawn(move || {
             let fixture = fixture();
             let mut cdn_requests = 0;
+            let mut stalled = Vec::new();
 
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
@@ -72,6 +75,10 @@ impl Server {
                     let reply = replies[cdn_requests.min(replies.len() - 1)];
                     cdn_requests += 1;
                     send_fixture(&mut stream, &fixture, request.range.as_deref(), reply);
+                    if let Reply::Stall = reply {
+                        stalled.push(stream);
+                        continue;
+                    }
                 }
 
                 stream.shutdown(Shutdown::Write).unwrap();
@@ -145,7 +152,7 @@ fn send_fixture(stream: &mut TcpStream, fixture: &[u8], range: Option<&str>, rep
     .unwrap();
 
     let sent = match reply {
-        Reply::Cut => &body[..CUT_AT],
+        Reply::Cut | Reply::Stall => &body[..CUT_AT],
         Reply::Full | Reply::Corrupt => &body,
     };
     stream.write_all(sent).unwrap();
@@ -167,7 +174,7 @@ impl Setup {
 
         let fixture = fixture();
         let config = format!(
-            "download_retry_delay = \"1ms\"\n\n[model]\nrepo = \"{REPO}\"\nrevision = \"{REVISION}\"\nfile = \"{FILE}\"\nsize = {}\nsha256 = \"{}\"\n",
+            "download_retry_delay = \"1ms\"\ndownload_idle_timeout = \"500ms\"\n\n[model]\nrepo = \"{REPO}\"\nrevision = \"{REVISION}\"\nfile = \"{FILE}\"\nsize = {}\nsha256 = \"{}\"\n",
             fixture.len(),
             hex::encode(Sha256::digest(&fixture)),
         );
@@ -267,9 +274,10 @@ fn downloads_the_model_and_reports_each_step() {
     );
 }
 
-#[test]
-fn an_interrupted_download_resumes_from_the_partial_size() {
-    let server = Server::start(vec![Reply::Cut, Reply::Full]);
+/// Runs setup against a server whose first transfer goes wrong after `CUT_AT` bytes and checks that the retry
+/// resumes there, sending `Range` both to the hub and, after its redirect, to the CDN. Returns the events.
+fn assert_resumes_after(first: Reply) -> Vec<Value> {
+    let server = Server::start(vec![first, Reply::Full]);
     let setup = Setup::new();
 
     let (output, events) = setup.run(&server.endpoint());
@@ -287,6 +295,29 @@ fn an_interrupted_download_resumes_from_the_partial_size() {
             request(resolve_path(), Some(&range)),
             request(cdn_path(), Some(&range)),
         ]
+    );
+
+    events
+}
+
+#[test]
+fn an_interrupted_download_resumes_from_the_partial_size() {
+    assert_resumes_after(Reply::Cut);
+}
+
+#[test]
+fn a_stalled_download_times_out_and_resumes_from_the_partial_size() {
+    let events = assert_resumes_after(Reply::Stall);
+
+    let retry = events
+        .iter()
+        .find(|event| event["event"] == "retry")
+        .unwrap();
+    assert!(
+        retry["message"]
+            .as_str()
+            .unwrap()
+            .contains("no data for 500ms")
     );
 }
 
@@ -367,36 +398,47 @@ fn running_setup_again_with_a_good_file_present_does_nothing() {
     assert_eq!(server.requests(), requests);
 }
 
+fn spawn_events(mut command: Command) -> (Child, impl Iterator<Item = Value>) {
+    let mut child = command.stdout(Stdio::piped()).spawn().unwrap();
+    let lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let events = lines.map(|line| serde_json::from_str(&line.unwrap()).unwrap());
+    (child, events)
+}
+
 #[test]
-fn with_no_host_to_reach_setup_waits_and_continues_once_it_can() {
+fn a_refused_connection_counts_as_a_failure_and_is_retried() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
     let setup = Setup::new();
 
-    let mut child = setup
-        .command(&format!("http://{addr}"))
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let mut events: Vec<Value> = Vec::new();
-
-    while events
-        .last()
-        .is_none_or(|event| event["event"] != "waiting")
-    {
-        events.push(serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap());
-    }
+    let (mut child, mut events) = spawn_events(setup.command(&format!("http://{addr}")));
+    assert_eq!(events.next().unwrap()["event"], "file");
+    assert_eq!(events.next().unwrap()["event"], "retry");
 
     Server::on(TcpListener::bind(addr).unwrap(), vec![Reply::Full]);
-    for line in lines {
-        events.push(serde_json::from_str(&line.unwrap()).unwrap());
-    }
+    let events: Vec<Value> = events.collect();
 
     assert!(child.wait().unwrap().success());
-    assert_eq!(kinds(&events), ["file", "waiting", "verifying", "done"]);
+    // Attempts already under way when the server came up may still have been refused.
+    let kinds = kinds(&events);
+    let retries = kinds.iter().take_while(|kind| **kind == "retry").count();
+    assert_eq!(kinds[retries..], ["verifying", "done"]);
     assert_eq!(fs::read(setup.model()).unwrap(), fixture());
+}
+
+#[test]
+fn with_no_network_setup_waits_for_one() {
+    let setup = Setup::new();
+
+    // `.invalid` never resolves (RFC 2606), which is what every lookup looks like without a network.
+    let (mut child, events) = spawn_events(setup.command("http://trove-test.invalid"));
+    let events: Vec<Value> = events.take(2).collect();
+
+    assert_eq!(kinds(&events), ["file", "waiting"]);
+    assert!(child.try_wait().unwrap().is_none(), "setup stopped waiting");
+    child.kill().unwrap();
+    child.wait().unwrap();
 }
 
 #[test]

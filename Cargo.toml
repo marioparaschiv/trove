@@ -22,7 +22,8 @@ sha2 = "0.11.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 toml = "1.1.8"
-ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+# ureq changes its `unversioned` transport API (used for the download idle timeout) only in minor releases.
+ureq = { version = "~3.4.2", default-features = false, features = ["rustls"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 
 [workspace.lints.rust]

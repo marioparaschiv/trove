@@ -20,6 +20,8 @@ pub struct Config {
     pub store_folder: String,
     /// The first wait between download retries; later ones double up to a minute.
     pub download_retry_delay: Duration,
+    /// How long a download may wait for data before the attempt counts as failed and is retried.
+    pub download_idle_timeout: Duration,
     /// The model `trove setup` installs. Defaults to the pinned EmbeddingGemma 2 file.
     pub model: ModelFile,
 }
@@ -32,6 +34,7 @@ impl Default for Config {
             index_debounce: Duration::from_secs(30),
             store_folder: ".trove".to_owned(),
             download_retry_delay: Duration::from_secs(2),
+            download_idle_timeout: Duration::from_secs(60),
             model: ModelFile::pinned(),
         }
     }
@@ -67,6 +70,7 @@ struct RawConfig {
     index_debounce: Option<String>,
     store_folder: Option<String>,
     download_retry_delay: Option<String>,
+    download_idle_timeout: Option<String>,
     model: Option<RawModel>,
 }
 
@@ -125,6 +129,12 @@ impl Config {
                 "download_retry_delay",
                 raw.download_retry_delay,
                 defaults.download_retry_delay,
+            )?,
+            download_idle_timeout: timeout(
+                &path,
+                "download_idle_timeout",
+                raw.download_idle_timeout,
+                defaults.download_idle_timeout,
             )?,
             model: match raw.model {
                 Some(model) => model_file(&path, model)?,

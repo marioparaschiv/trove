@@ -11,7 +11,14 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use ureq::{
     Agent,
+    config::Config as HttpConfig,
     http::{Uri, header},
+    unversioned::{
+        resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
+        transport::{
+            Buffers, ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport,
+        },
+    },
 };
 
 use crate::{config::Config, data_dir::DataDir};
@@ -32,7 +39,6 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 const MAX_REDIRECTS: u32 = 10;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One file in a Hugging Face repository at a fixed revision, with its expected size and SHA-256.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,13 +219,7 @@ fn install(
             bytes: model.size,
             from: Source::Download,
         });
-        download(
-            model,
-            &model.url(&endpoint),
-            &partial,
-            config.download_retry_delay,
-            emit,
-        )?;
+        download(config, &model.url(&endpoint), &partial, emit)?;
     }
 
     fs::rename(&partial, &path).map_err(|source| io_error("rename", &partial, source))?;
@@ -274,19 +274,21 @@ fn hf_endpoint() -> Result<String, SetupError> {
 }
 
 fn download(
-    model: &ModelFile,
+    config: &Config,
     url: &str,
     partial: &Path,
-    retry_delay: Duration,
     emit: &mut dyn FnMut(Event),
 ) -> Result<(), SetupError> {
-    let agent = Agent::new_with_config(
+    let model = &config.model;
+    let retry_delay = config.download_retry_delay;
+    let agent = Agent::with_parts(
         Agent::config_builder()
             .http_status_as_error(false)
             .max_redirects(0)
             .timeout_connect(Some(CONNECT_TIMEOUT))
-            .timeout_recv_response(Some(RESPONSE_TIMEOUT))
             .build(),
+        DefaultConnector::new().chain(IdleTimeout(config.download_idle_timeout)),
+        LookupFailedResolver(DefaultResolver::default()),
     );
 
     let mut progress = Progress {
@@ -518,25 +520,103 @@ fn redirect_target(url: &str, response: &ureq::http::Response<ureq::Body>) -> Op
     ))
 }
 
-/// Failing to reach the host at all means there is no network yet, so setup waits instead of counting a failure.
+/// A name that can't be looked up or a network that can't be reached means there is no network yet, so setup
+/// waits instead of counting a failure. A refused connection means the network works and the host is down.
 fn is_offline(error: &TransferError) -> bool {
     let TransferError::Http(error) = error else {
         return false;
     };
 
     match error {
-        ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => true,
-        ureq::Error::Timeout(timeout) => {
-            matches!(timeout, ureq::Timeout::Resolve | ureq::Timeout::Connect)
-        }
+        ureq::Error::HostNotFound | ureq::Error::Timeout(ureq::Timeout::Resolve) => true,
         ureq::Error::Io(error) => matches!(
             error.kind(),
-            io::ErrorKind::ConnectionRefused
-                | io::ErrorKind::NetworkUnreachable
+            io::ErrorKind::NetworkUnreachable
                 | io::ErrorKind::HostUnreachable
                 | io::ErrorKind::NetworkDown
         ),
         _ => false,
+    }
+}
+
+/// ureq reports a failed lookup as a plain I/O error, indistinguishable from a failed connection.
+#[derive(Debug)]
+struct LookupFailedResolver(DefaultResolver);
+
+impl Resolver for LookupFailedResolver {
+    fn resolve(
+        &self,
+        uri: &Uri,
+        config: &HttpConfig,
+        timeout: NextTimeout,
+    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
+        match self.0.resolve(uri, config, timeout) {
+            Err(ureq::Error::Io(_)) => Err(ureq::Error::HostNotFound),
+            result => result,
+        }
+    }
+}
+
+/// Fails any wait for data longer than the idle timeout, so a stalled transfer becomes a retry instead of a hang.
+/// ureq's own timeouts only bound whole phases of a request.
+#[derive(Debug)]
+struct IdleTimeout(Duration);
+
+impl<In: Transport> Connector<In> for IdleTimeout {
+    type Out = IdleTransport<In>;
+
+    fn connect(
+        &self,
+        _: &ConnectionDetails,
+        chained: Option<In>,
+    ) -> Result<Option<Self::Out>, ureq::Error> {
+        Ok(chained.map(|inner| IdleTransport {
+            inner,
+            idle: self.0,
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct IdleTransport<T> {
+    inner: T,
+    idle: Duration,
+}
+
+impl<T: Transport> Transport for IdleTransport<T> {
+    fn buffers(&mut self) -> &mut dyn Buffers {
+        self.inner.buffers()
+    }
+
+    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
+        self.inner.transmit_output(amount, timeout)
+    }
+
+    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
+        if *timeout.after <= self.idle {
+            return self.inner.await_input(timeout);
+        }
+
+        let idle = NextTimeout {
+            after: self.idle.into(),
+            reason: timeout.reason,
+        };
+
+        match self.inner.await_input(idle) {
+            Err(ureq::Error::Timeout(_)) => Err(ureq::Error::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("no data for {}", humantime::format_duration(self.idle)),
+            ))),
+            result => result,
+        }
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn is_tls(&self) -> bool {
+        self.inner.is_tls()
     }
 }
 
