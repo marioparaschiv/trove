@@ -183,3 +183,80 @@ fn categories_follow_the_topics_and_are_the_same_each_time() {
     assert_eq!(status, 200);
     assert_eq!(over_http, response);
 }
+
+/// The body of a category note as the Obsidian plugin writes it: Bases views of its subcategories and notes.
+const CATEGORY_NOTE: &str = r#"## Subcategories
+
+```base
+filters:
+  and:
+    - list(parent).contains(this)
+views:
+  - type: table
+    name: Subcategories
+```
+
+## Notes
+
+```base
+filters:
+  and:
+    - list(category).contains(this)
+views:
+  - type: table
+    name: Notes
+```
+"#;
+
+/// Adds `name: "value"` to the note's frontmatter, as Obsidian's frontmatter API would.
+fn set_property(note: &Path, name: &str, value: &str) {
+    let text = fs::read_to_string(note).unwrap();
+    let property = format!("{name}: \"{value}\"\n");
+    let text = match text.strip_prefix("---\n") {
+        Some(rest) => format!("---\n{property}{rest}"),
+        None => format!("---\n{property}---\n{text}"),
+    };
+    fs::write(note, text).unwrap();
+}
+
+#[test]
+fn category_notes_in_the_excluded_folder_leave_the_categories_unchanged() {
+    let vault = copy_of(Path::new(VAULT));
+    let serve = Serve::start_in(indexed(vault.path()));
+    let excluding = "/categories?exclude_folder=Categories";
+    let (status, before) = serve.call("GET", excluding, None);
+    assert_eq!(status, 200, "{before}");
+    assert_eq!(serve.call("GET", "/categories", None).1, before);
+
+    // What the plugin writes: a category note per category, linking to its parent, and `category` on each note.
+    let categories = before["categories"].as_array().unwrap();
+    let link = |id: &Value| {
+        let category = categories
+            .iter()
+            .find(|category| &category["id"] == id)
+            .unwrap();
+        format!("[[Categories/{}]]", category["name"].as_str().unwrap())
+    };
+    let folder = vault.path().join("Categories");
+    fs::create_dir(&folder).unwrap();
+    for category in categories {
+        let note = folder.join(format!("{}.md", category["name"].as_str().unwrap()));
+        fs::write(&note, CATEGORY_NOTE).unwrap();
+        if !category["parent"].is_null() {
+            set_property(&note, "parent", &link(&category["parent"]));
+        }
+        for member in category["notes"].as_array().unwrap() {
+            let path = vault.path().join(member["path"].as_str().unwrap());
+            set_property(&path, "category", &link(&category["id"]));
+        }
+    }
+    let (status, report) = serve.call("POST", "/index", Some(&serde_json::json!({})));
+    assert_eq!(status, 200, "{report}");
+
+    let (status, after) = serve.call("GET", excluding, None);
+    assert_eq!(status, 200, "{after}");
+    assert_eq!(after, before);
+
+    let (status, response) = serve.call("GET", "/categories?exclude_folder=..", None);
+    assert_eq!(status, 400, "{response}");
+}

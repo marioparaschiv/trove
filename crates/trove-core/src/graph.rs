@@ -1,7 +1,9 @@
+mod folder;
 mod node_key;
 mod resolve;
 mod vault;
 
+pub use folder::{ExcludedFolder, InvalidFolder};
 pub(crate) use node_key::{EdgeKind, NodeKey};
 pub(crate) use vault::{Node, VaultGraph};
 

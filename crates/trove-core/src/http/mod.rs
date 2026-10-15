@@ -13,6 +13,7 @@ mod runtime;
 mod search;
 mod sources;
 mod status;
+mod suggestions;
 mod watcher;
 
 use std::{
@@ -97,6 +98,9 @@ fn router() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(sources::list, sources::add, sources::remove))
         .routes(routes!(indexing::index))
         .routes(routes!(categories::categories))
+        .routes(routes!(suggestions::suggestions))
+        .routes(routes!(suggestions::decide))
+        .routes(routes!(suggestions::orphans))
 }
 
 /// A started service: it holds the lock, listens, and has written the runtime file.

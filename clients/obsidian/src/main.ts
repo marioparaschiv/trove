@@ -1,6 +1,9 @@
 import { FileSystemAdapter, Notice, Plugin } from "obsidian";
+import { Breadcrumbs } from "./breadcrumb.ts";
+import { CategoryCommands } from "./categories.ts";
 import { message } from "./connection.ts";
 import { prepareTrove } from "./first-run.ts";
+import { LinkSuggestions } from "./link-suggestions.ts";
 import { RelatedNotes } from "./related.ts";
 import { DEFAULT_SETTINGS, parseSettings, type Settings } from "./settings.ts";
 import { TroveSettingTab } from "./settings-tab.ts";
@@ -33,7 +36,15 @@ export default class TrovePlugin extends Plugin {
       name: "Open quick switcher",
       callback: () => new Switcher(this.app, binary, vaultPath).open(),
     });
+    this.addCommand({
+      id: "review-link-suggestions",
+      name: "Review link suggestions",
+      callback: () =>
+        new LinkSuggestions(this.app, binary, vaultPath, this.settings.categoryFolder).open(),
+    });
+    new CategoryCommands(this, binary, vaultPath).register();
     new RelatedNotes(this, binary, vaultPath).register();
+    new Breadcrumbs(this).register();
     this.addSettingTab(new TroveSettingTab(this.app, this));
   }
 }
