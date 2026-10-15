@@ -148,10 +148,11 @@ impl SyncStore {
         }
     }
 
-    /// Removes the conflict copies sync tools leave anywhere in the store folder. Everything in them can be rebuilt.
+    /// Removes the conflict copies sync tools leave among the vector files, which can always be rebuilt. Conflict
+    /// copies of decisions files are kept, since reading the decisions merges them.
     pub fn remove_conflict_copies(&self) -> Vec<StoreError> {
         let mut errors = Vec::new();
-        remove_conflict_copies_in(&self.root, &mut errors);
+        remove_conflict_copies_in(&self.root.join(VECTORS_FOLDER), &mut errors);
         errors
     }
 }

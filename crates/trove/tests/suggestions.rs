@@ -161,6 +161,33 @@ fn decisions_from_two_data_folders_merge_and_the_latest_wins() {
 }
 
 #[test]
+fn a_conflict_copy_of_a_decisions_file_is_kept_and_read() {
+    let vault = copy_of(Path::new(RELATED_VAULT));
+    let serve = Serve::start_indexed(indexed(vault.path()));
+    decide(&serve, vault.path(), ESPRESSO, POUR_OVER, "dismissed");
+
+    let decisions = vault.path().join(".trove/decisions");
+    let file = fs::read_dir(&decisions)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let stem = file.file_stem().unwrap().to_str().unwrap();
+    let conflict = decisions.join(format!(
+        "{stem}.sync-conflict-20261015-101500-ABCDEF7.jsonl"
+    ));
+    fs::rename(&file, &conflict).unwrap();
+    index(&serve);
+
+    assert!(conflict.is_file());
+    assert_eq!(merged_state(vault.path()), Some(SuggestionState::Dismissed));
+    assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
+
+    serve.stop();
+}
+
+#[test]
 fn orphans_are_the_notes_with_no_link_in_or_out() {
     let vault = copy_of(Path::new(RELATED_VAULT));
     let serve = Serve::start_indexed(indexed(vault.path()));
