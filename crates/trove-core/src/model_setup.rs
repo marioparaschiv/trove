@@ -198,6 +198,20 @@ fn install(
 ) -> Result<PathBuf, SetupError> {
     let model = &config.model;
     let path = model.path_in(data_dir);
+    let folder = data_dir.path().join(MODELS_FOLDER);
+    fs::create_dir_all(&folder).map_err(|source| io_error("create", &folder, source))?;
+
+    // Two setups at once would both append to the partial file, so the second waits and then finds the model.
+    let lock_path = folder.join(format!("{}.lock", model.file));
+    let lock = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| io_error("open", &lock_path, source))?;
+    lock.lock()
+        .map_err(|source| io_error("lock", &lock_path, source))?;
+
     if path
         .try_exists()
         .map_err(|source| io_error("check", &path, source))?
@@ -205,8 +219,6 @@ fn install(
         return Ok(path);
     }
 
-    let folder = data_dir.path().join(MODELS_FOLDER);
-    fs::create_dir_all(&folder).map_err(|source| io_error("create", &folder, source))?;
     let partial = folder.join(format!("{}.partial", model.file));
 
     if let Some(cached) = hf_cache_copy(model)? {
