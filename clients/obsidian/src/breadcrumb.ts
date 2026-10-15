@@ -1,6 +1,7 @@
 import { Keymap, MarkdownView, Notice, type Plugin } from "obsidian";
 import { noteState } from "./categories.ts";
 import { categoryChain } from "./category-notes.ts";
+import { categoryName } from "./category-pins.ts";
 import { message } from "./connection.ts";
 
 interface Breadcrumb {
@@ -104,8 +105,7 @@ export class Breadcrumbs {
         el.createSpan({ cls: "view-header-breadcrumb-separator", text: "/" });
       }
 
-      const name = path.replace(/^.*\//, "").replace(/\.md$/, "");
-      el.createSpan({ cls: "view-header-breadcrumb", text: name }).addEventListener(
+      el.createSpan({ cls: "view-header-breadcrumb", text: categoryName(path) }).addEventListener(
         "click",
         (evt) => {
           this.plugin.app.workspace

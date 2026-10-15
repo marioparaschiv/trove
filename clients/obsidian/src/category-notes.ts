@@ -1,4 +1,5 @@
 import type { Schemas } from "@trove/client";
+import { linkPath } from "./links.ts";
 
 type Category = Schemas["Category"];
 
@@ -139,7 +140,7 @@ export function describeChange(change: CategoryChange): string {
 
 /** The property value linking to the note at `path`. */
 export function linkTo(path: string): string {
-  return `[[${path.replace(/\.md$/, "")}]]`;
+  return `[[${linkPath(path)}]]`;
 }
 
 /** The link path a property value links to (`"[[Note#Heading|Alias]]"` gives `Note`); the first of a list. */

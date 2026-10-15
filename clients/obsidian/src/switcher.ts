@@ -11,6 +11,7 @@ import {
   SuggestModal,
 } from "obsidian";
 import { connectTo, message, noteLink, vaultSource } from "./connection.ts";
+import { linkPath } from "./links.ts";
 import {
   type FileSuggestion,
   inVault,
@@ -71,23 +72,23 @@ export class Switcher extends SuggestModal<Suggestion> {
 
     if (suggestion.kind === "file") {
       if (suggestion.match === null) {
-        title.setText(withoutExtension(suggestion.path));
+        title.setText(linkPath(suggestion.path));
       } else {
-        renderResults(title, withoutExtension(suggestion.path), suggestion.match);
+        renderResults(title, linkPath(suggestion.path), suggestion.match);
       }
 
       return;
     }
 
     const { path, heading_path } = suggestion.result;
-    title.setText(withoutExtension(path));
+    title.setText(linkPath(path));
     if (heading_path.length > 0) {
       content.createDiv({ cls: "suggestion-note", text: heading_path.join(" > ") });
     }
   }
 
   onChooseSuggestion(suggestion: Suggestion, evt: MouseEvent | KeyboardEvent): void {
-    const linktext = linkTo(suggestion);
+    const linktext = suggestionLink(suggestion);
     this.app.workspace
       .openLinkText(linktext, "", Keymap.isModEvent(evt))
       .catch((error: unknown) => new Notice(`Trove: couldn't open ${linktext}: ${message(error)}`));
@@ -157,7 +158,7 @@ export class Switcher extends SuggestModal<Suggestion> {
     const fuzzy = prepareFuzzySearch(query);
     const matches: { path: string; match: FuzzyMatch }[] = [];
     for (const file of vault.getMarkdownFiles()) {
-      const match = fuzzy(withoutExtension(file.path));
+      const match = fuzzy(linkPath(file.path));
       if (match !== null) {
         matches.push({ path: file.path, match });
       }
@@ -180,10 +181,6 @@ export class Switcher extends SuggestModal<Suggestion> {
 }
 
 /** A link to the note, at the matched heading for Trove results. */
-function linkTo(suggestion: Suggestion): string {
+function suggestionLink(suggestion: Suggestion): string {
   return suggestion.kind === "file" ? suggestion.path : noteLink(suggestion.result);
-}
-
-function withoutExtension(path: string): string {
-  return path.endsWith(".md") ? path.slice(0, -".md".length) : path;
 }

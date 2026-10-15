@@ -1,5 +1,6 @@
 import type { Schemas } from "@trove/client";
 import { categoryChain, type NoteState } from "./category-notes.ts";
+import { linkPath } from "./links.ts";
 
 export type CategoryPin = Schemas["CategoryPin"];
 
@@ -12,7 +13,7 @@ export function inFolder(path: string, folder: string): boolean {
 
 /** A category's name: its category note's file name. */
 export function categoryName(categoryNote: string): string {
-  return categoryNote.replace(/^.*\//, "").replace(/\.md$/, "");
+  return linkPath(categoryNote.replace(/^.*\//, ""));
 }
 
 /** The notes in a category or below it, by path. */
