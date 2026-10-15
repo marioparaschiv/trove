@@ -13,10 +13,7 @@ test("opens the note at its best heading", () => {
     score: 3.4,
   });
 
-  assert.equal(
-    url,
-    "obsidian://open?vault=Notes%20Vault&file=Software%2FRetry%20backoff%23Jitter",
-  );
+  assert.equal(url, "obsidian://open?vault=Notes%20Vault&file=Software%2FRetry%20backoff%23Jitter");
 });
 
 test("opens the note at the top when the match is before the first heading", () => {
