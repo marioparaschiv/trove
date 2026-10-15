@@ -1,3 +1,4 @@
+mod categories;
 mod eval;
 mod index;
 mod openapi;
@@ -33,6 +34,8 @@ pub enum Command {
     Search(search::Args),
     /// Unload the model now
     Unload(unload::Args),
+    /// Show the notes grouped into categories
+    Categories(categories::Args),
     /// Score search against a queries file
     Eval(eval::Args),
     /// Print the HTTP API's OpenAPI spec, which the TypeScript client is generated from
@@ -50,6 +53,7 @@ impl Command {
             Self::Index(args) => index::run(ctx, args),
             Self::Search(args) => search::run(ctx, args),
             Self::Unload(args) => unload::run(ctx, args),
+            Self::Categories(args) => categories::run(ctx, args),
             Self::Eval(args) => eval::run(ctx, args),
             Self::Openapi(args) => openapi::run(ctx, args),
         }

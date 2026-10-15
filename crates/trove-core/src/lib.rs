@@ -1,3 +1,4 @@
+pub mod categories;
 pub mod config;
 pub mod data_dir;
 pub mod embedder;

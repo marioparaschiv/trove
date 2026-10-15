@@ -22,12 +22,16 @@ getrandom = "0.4.3"
 half = "2.7.1"
 hex = "0.4.3"
 humantime = "2.4.0"
+# graspologic's hierarchical Leiden, which is not on crates.io.
+network_partitions = { git = "https://github.com/graspologic-org/graspologic-native", rev = "773181488b4e5b81925e302b972b294fd51f61a4" }
 notify = "8.2.0"
+rand = { version = "0.10.3", default-features = false }
 rusqlite = { version = "0.40.2", features = ["bundled", "fallible_uint"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde-saphyr = "2.0.0"
 sha2 = "0.11.1"
+stop-words = "0.10.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
