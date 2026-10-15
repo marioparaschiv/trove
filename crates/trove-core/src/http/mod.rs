@@ -98,7 +98,7 @@ fn router() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(sources::list, sources::add, sources::remove))
         .routes(routes!(indexing::index))
         .routes(routes!(categories::categories))
-        .routes(routes!(suggestions::list))
+        .routes(routes!(suggestions::suggestions))
         .routes(routes!(suggestions::decide))
         .routes(routes!(suggestions::orphans))
 }

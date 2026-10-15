@@ -48,7 +48,7 @@ impl From<SuggestionsError> for ApiError {
         Rejected,
     ),
 )]
-pub(super) async fn list(
+pub(super) async fn suggestions(
     State(state): State<Arc<AppState>>,
     request: Result<Query<SuggestionsRequest>, QueryRejection>,
 ) -> Result<Json<SuggestionsResponse>, ApiError> {
