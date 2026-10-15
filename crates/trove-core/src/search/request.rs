@@ -1,9 +1,14 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Mutex,
+};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::{Candidate, CollapseToNotes, Meaning, Pipeline, Query, SearchError};
+use super::{
+    Candidate, CollapseToNotes, Fusion, Meaning, Pipeline, Query, SearchError, Signal, Stage, Words,
+};
 use crate::{
     embedder::Embedder,
     index::{self, Index},
@@ -19,6 +24,9 @@ pub struct SearchRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(minimum = 1)]
     pub limit: Option<u32>,
+    /// Stages to turn off, to measure what each adds.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub skip: BTreeSet<Signal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -38,6 +46,8 @@ pub struct SearchResult {
     /// The headings above the best chunk, outermost first. Empty for text before the first heading.
     pub heading_path: Vec<String>,
     pub score: f32,
+    /// The stages that found the note.
+    pub why: BTreeSet<Signal>,
 }
 
 /// Finds the notes that best match `request`.
@@ -55,10 +65,17 @@ pub fn search(
         return Err(SearchError::ZeroLimit);
     }
 
-    let pipeline = Pipeline::new(vec![
-        Box::new(Meaning::new(index, embedder)),
-        Box::new(CollapseToNotes::new(index)),
-    ]);
+    let mut stages: Vec<Box<dyn Stage>> = Vec::new();
+    if !request.skip.contains(&Signal::Meaning) {
+        stages.push(Box::new(Meaning::new(index, embedder)));
+    }
+    if !request.skip.contains(&Signal::Words) {
+        stages.push(Box::new(Words::new(index)));
+    }
+    stages.push(Box::new(Fusion));
+    stages.push(Box::new(CollapseToNotes::new(index)));
+
+    let pipeline = Pipeline::new(stages);
     let mut candidates = pipeline.run(&Query {
         text: text.to_owned(),
     })?;
@@ -104,6 +121,7 @@ fn results(index: &Index, candidates: &[Candidate]) -> rusqlite::Result<Vec<Sear
                     heading_path.split('\n').map(str::to_owned).collect()
                 },
                 score: candidate.score,
+                why: candidate.why.clone(),
             })
         })
         .collect())
