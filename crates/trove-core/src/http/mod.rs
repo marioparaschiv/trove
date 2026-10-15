@@ -200,6 +200,8 @@ impl Service {
             .await
             .map_err(ServeError::ServerPanic)
             .and_then(|result| result.map_err(ServeError::Server));
+        // A run or import already under way goes on in a blocking thread, so the lock is held until it ends.
+        let _turn = self.state.indexing.turn.lock().await;
         let removed = RuntimeFile::remove(&self.data_dir).map_err(ServeError::from);
 
         stopped.and(served).and(removed)
