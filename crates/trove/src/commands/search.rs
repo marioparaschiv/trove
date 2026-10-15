@@ -24,6 +24,7 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
     let request = SearchRequest {
         query: args.query,
         limit: Some(args.limit),
+        skip: Default::default(),
     };
     let response: SearchResponse = match Service::connect(&ctx.data_dir)? {
         Some(service) => service.post("/search", &request)?,

@@ -1,12 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::Mutex};
 
 use super::{Candidate, Query, SearchError, Stage};
 use crate::index::{self, Index};
 
-/// Keeps each note's best chunk, so results are notes that point at their best heading. Orders them best first.
+/// Keeps each note's best chunk, so results are notes that point at their best heading, listing every stage that found
+/// any of the note's chunks. Orders them best first.
 pub struct CollapseToNotes<'a> {
     index: &'a Mutex<Index>,
 }
@@ -44,13 +42,22 @@ impl Stage for CollapseToNotes<'_> {
         };
 
         candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
-        let mut seen = HashSet::new();
-        candidates.retain(|candidate| {
-            notes
-                .get(&candidate.chunk_id)
-                .is_some_and(|note| seen.insert(*note))
-        });
+        let mut places: HashMap<i64, usize> = HashMap::new();
+        let mut collapsed: Vec<Candidate> = Vec::new();
+        for candidate in candidates {
+            let Some(&note) = notes.get(&candidate.chunk_id) else {
+                continue;
+            };
 
-        Ok(candidates)
+            match places.get(&note) {
+                Some(&place) => collapsed[place].why.extend(candidate.why),
+                None => {
+                    places.insert(note, collapsed.len());
+                    collapsed.push(candidate);
+                }
+            }
+        }
+
+        Ok(collapsed)
     }
 }

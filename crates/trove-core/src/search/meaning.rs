@@ -1,6 +1,6 @@
-use std::sync::Mutex;
+use std::{collections::BTreeSet, sync::Mutex};
 
-use super::{Candidate, Query, SearchError, Stage};
+use super::{Candidate, Query, SearchError, Signal, Stage};
 use crate::{
     embedder::{Embedder, Input},
     index::{self, Index},
@@ -60,6 +60,7 @@ impl Stage for Meaning<'_> {
             .map(|(chunk_id, score)| Candidate {
                 chunk_id,
                 score: (score - mean) / deviation,
+                why: BTreeSet::from([Signal::Meaning]),
             })
             .filter(|candidate| candidate.score >= MIN_Z)
             .collect();
