@@ -16,3 +16,9 @@ test("ends a last line that has no line break first", () => {
 test("an empty note gets just the link", () => {
   assert.equal(appendLink("", "[[Pour over]]"), "[[Pour over]]\n");
 });
+
+test("a link already on its own line isn't added again", () => {
+  const linked = "Grind finer.\n\n[[Pour over]]\n";
+
+  assert.equal(appendLink(linked, "[[Pour over]]"), linked);
+});
