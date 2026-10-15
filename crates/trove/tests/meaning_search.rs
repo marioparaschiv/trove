@@ -81,7 +81,8 @@ fn assert_found_first(response: &Value, paraphrase: &Paraphrase) {
 
 #[test]
 fn a_paraphrase_sharing_no_words_finds_its_note_first_at_the_heading() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     for paraphrase in &PARAPHRASES {
         assert_shares_no_words(paraphrase);
@@ -91,7 +92,8 @@ fn a_paraphrase_sharing_no_words_finds_its_note_first_at_the_heading() {
 
 #[test]
 fn a_query_matching_nothing_finds_nothing() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     assert_eq!(
         search(data_dir.path(), MATCHES_NOTHING),
@@ -128,8 +130,9 @@ fn notes_in_obsidian_and_trash_folders_are_never_indexed() {
 
 #[test]
 fn index_and_search_go_through_a_running_service() {
+    let vault = vault_copy();
     let data_dir = data_dir_with_model();
-    run(data_dir.path(), &["sources", "add", FIXTURE_VAULT]);
+    run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
     let serve = Serve::start_in(data_dir);
 
     run(serve.data_dir.path(), &["index"]);

@@ -4,6 +4,7 @@ mod frontmatter;
 mod links;
 mod neighbours;
 mod scan;
+mod store;
 
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ use thiserror::Error;
 use crate::{
     embedder::{Embedder, EmbedderError},
     index::IndexError,
+    sync_store::StoredChunk,
 };
 
 pub use chunker::Chunker;
@@ -20,6 +22,7 @@ pub(crate) use chunker::document_title;
 pub use embed::EmbedProgress;
 pub use links::LinkParser;
 pub use scan::{IndexMode, IndexProblem, IndexReport, index_sources};
+pub use store::import_vector_files;
 
 #[derive(Debug, Error)]
 pub enum IndexerError {
@@ -40,6 +43,9 @@ pub struct NoteFile<'a> {
     pub id: i64,
     pub title: &'a str,
     pub text: &'a str,
+    /// The chunks the sync store holds for exactly this text, already checked against it. The chunker takes them
+    /// instead of splitting the note again, which needs the model.
+    pub stored_chunks: Option<&'a [StoredChunk]>,
 }
 
 /// One independent step of indexing a note. Each processor replaces the rows it owns for the note.

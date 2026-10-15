@@ -2,7 +2,7 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{FIXTURE_VAULT, Serve, indexed, result_paths, run, vault_copy};
+use common::{Serve, indexed, result_paths, run, vault_copy};
 use serde_json::{Value, json};
 
 /// Finds only the hub note by meaning; the hub links to notes on unrelated topics, each through one kind of link.
@@ -77,7 +77,8 @@ fn assert_found_by_graph(response: &Value, target: &Target) {
 
 #[test]
 fn notes_linked_from_the_match_are_found_by_the_graph_and_only_with_it() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     let response = search(data_dir.path(), &[]);
     assert_eq!(response["results"][0]["path"], HUB, "{response}");

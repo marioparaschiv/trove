@@ -2,7 +2,7 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{FIXTURE_VAULT, Serve, data_dir_with_model, indexed, result_paths, run, trove};
+use common::{Serve, data_dir_with_model, indexed, path_str, result_paths, run, trove, vault_copy};
 use serde_json::{Value, json};
 
 const QUERIES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/queries.json");
@@ -24,7 +24,8 @@ fn search(data_dir: &Path, query: &str, switches: &[&str]) -> Value {
 
 #[test]
 fn words_find_an_exact_identifier_that_meaning_misses() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     let response = search(data_dir.path(), IDENTIFIER, &[]);
     assert_eq!(result_paths(&response), [IDENTIFIER_NOTE], "{response}");
@@ -38,7 +39,8 @@ fn words_find_an_exact_identifier_that_meaning_misses() {
 
 #[test]
 fn meaning_finds_a_paraphrase_that_words_miss() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     let response = search(data_dir.path(), PARAPHRASE, &[]);
     assert_eq!(result_paths(&response)[0], PARAPHRASE_NOTE, "{response}");
@@ -59,7 +61,8 @@ fn meaning_finds_a_paraphrase_that_words_miss() {
 
 #[test]
 fn each_result_lists_the_stages_that_found_it() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     let response = search(data_dir.path(), "boiler", &[]);
     assert_eq!(result_paths(&response), [IDENTIFIER_NOTE], "{response}");
@@ -74,8 +77,9 @@ fn each_result_lists_the_stages_that_found_it() {
 
 #[test]
 fn stage_switches_and_why_work_over_http() {
+    let vault = vault_copy();
     let data_dir = data_dir_with_model();
-    run(data_dir.path(), &["sources", "add", FIXTURE_VAULT]);
+    run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
     let serve = Serve::start_in(data_dir);
     run(serve.data_dir.path(), &["index"]);
 
@@ -120,7 +124,8 @@ fn metric(output: &str, name: &str) -> f64 {
 
 #[test]
 fn eval_scores_the_fixture_queries() {
-    let data_dir = indexed(Path::new(FIXTURE_VAULT));
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
 
     let output = run(data_dir.path(), &["eval", QUERIES]);
     for name in ["recall@5", "recall@10", "MRR"] {
