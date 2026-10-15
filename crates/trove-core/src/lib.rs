@@ -7,3 +7,4 @@ pub mod index;
 pub mod indexer;
 pub mod model_setup;
 pub mod search;
+pub mod sync_store;
