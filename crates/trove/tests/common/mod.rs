@@ -174,16 +174,22 @@ impl Serve {
 
     /// Calls the API as a client would and returns the status and the JSON body.
     pub fn call(&self, method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
+        let (status, body) = self.request(method, path, body);
+
+        (status, serde_json::from_str(&body).unwrap())
+    }
+
+    /// Calls the API as a client would and returns the status and the body as it came.
+    pub fn request(&self, method: &str, path: &str, body: Option<&Value>) -> (u16, String) {
         let body = body.map(Value::to_string);
-        let (status, body) = read_response(self.send(
+
+        read_response(self.send(
             method,
             path,
             &self.local_host(),
             Some(&self.token),
             body.as_deref(),
-        ));
-
-        (status, serde_json::from_str(&body).unwrap())
+        ))
     }
 
     pub fn send(
@@ -245,6 +251,14 @@ impl Serve {
     pub fn stop(mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+    }
+
+    /// Stops the service and hands back its data folder, for a test that starts another service on it.
+    pub fn stop_keeping_data(mut self) -> TempDir {
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+
+        std::mem::replace(&mut self.data_dir, tempfile::tempdir().unwrap())
     }
 }
 

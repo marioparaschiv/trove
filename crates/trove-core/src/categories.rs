@@ -13,10 +13,10 @@ use rand::{SeedableRng, rngs::Xoshiro256PlusPlus};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    graph::{Graph, Node, VaultGraph},
+    graph::{ExcludedFolder, Graph, Node, VaultGraph},
     index::{self, Index},
 };
 use names::NoteTerms;
@@ -26,6 +26,17 @@ use names::NoteTerms;
 const SPLIT_SIZE: u32 = 10;
 /// Seeds Leiden, so the same graph always gives the same hierarchy.
 const SEED: u64 = 14;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct CategoriesRequest {
+    /// A folder inside each source, `/`-separated, whose notes are left out along with every link to them. The
+    /// Obsidian plugin names its category folder, so the category notes it writes don't change the categories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[param(value_type = Option<String>)]
+    pub exclude_folder: Option<ExcludedFolder>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CategoriesResponse {
@@ -71,12 +82,15 @@ struct Community {
 }
 
 /// Groups the indexed notes into a hierarchy of categories.
-pub fn categories(index: &Mutex<Index>) -> Result<CategoriesResponse, CategoriesError> {
+pub fn categories(
+    index: &Mutex<Index>,
+    request: &CategoriesRequest,
+) -> Result<CategoriesResponse, CategoriesError> {
     let (graph, notes, terms) = {
         let index = index::lock(index);
         let conn = index.connection();
         (
-            VaultGraph::load(conn)?,
+            VaultGraph::load_without(conn, request.exclude_folder.as_ref())?,
             notes(conn)?,
             NoteTerms::load(conn)?,
         )

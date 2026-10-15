@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use trove_core::{
-    categories::{self, CategoriesResponse, Category},
+    categories::{self, CategoriesRequest, CategoriesResponse, Category},
     index::Index,
 };
 
@@ -18,7 +18,10 @@ pub struct Args {
 pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
     let response: CategoriesResponse = match Service::connect(&ctx.data_dir)? {
         Some(service) => service.get("/categories")?,
-        None => categories::categories(&Mutex::new(Index::open(&ctx.data_dir)?))?,
+        None => categories::categories(
+            &Mutex::new(Index::open(&ctx.data_dir)?),
+            &CategoriesRequest::default(),
+        )?,
     };
 
     if args.json {

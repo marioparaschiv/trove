@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::Connection;
 
-use super::{EdgeKind, Graph, NodeKey, resolve::NotePaths};
+use super::{EdgeKind, ExcludedFolder, Graph, NodeKey, resolve::NotePaths};
 
 /// Semantic edges below this cosine similarity are left out. The stored edges keep every section's nearest whatever
 /// their similarity, so this can change without re-indexing. On the fixture vault, sections on unrelated topics reach
@@ -34,6 +34,8 @@ pub(crate) struct VaultGraph {
     pub(crate) nodes: Vec<Node>,
     chunk_nodes: HashMap<i64, usize>,
     note_nodes: HashMap<i64, usize>,
+    /// Which notes link to which, by file id: links and property links that resolve to another note.
+    pub(crate) links: BTreeSet<(i64, i64)>,
 }
 
 /// A note's share of a walk: the rank of its note node and sections together, and its best-ranked section.
@@ -46,8 +48,17 @@ pub(crate) struct NoteRank {
 
 impl VaultGraph {
     pub(crate) fn load(conn: &Connection) -> rusqlite::Result<Self> {
+        Self::load_without(conn, None)
+    }
+
+    /// The graph without the notes in `excluded`.
+    pub(crate) fn load_without(
+        conn: &Connection,
+        excluded: Option<&ExcludedFolder>,
+    ) -> rusqlite::Result<Self> {
         let mut builder = Builder {
             conn,
+            excluded,
             graph: Graph::default(),
             nodes: Vec::new(),
             notes: HashMap::new(),
@@ -58,8 +69,8 @@ impl VaultGraph {
         };
         builder.add_notes()?;
         builder.add_sections()?;
-        let citations = builder.add_stored_edges()?;
-        builder.add_shared_links(&citations);
+        let links = builder.add_stored_edges()?;
+        builder.add_shared_links(&links);
 
         Ok(Self {
             note_nodes: builder
@@ -70,6 +81,7 @@ impl VaultGraph {
             graph: builder.graph,
             nodes: builder.nodes,
             chunk_nodes: builder.chunk_nodes,
+            links,
         })
     }
 
@@ -110,6 +122,7 @@ struct Note {
 
 struct Builder<'a> {
     conn: &'a Connection,
+    excluded: Option<&'a ExcludedFolder>,
     graph: Graph,
     nodes: Vec<Node>,
     notes: HashMap<i64, Note>,
@@ -133,6 +146,9 @@ impl Builder<'_> {
         while let Some(row) = rows.next()? {
             let (file_id, source_id, path): (i64, i64, String) =
                 (row.get(0)?, row.get(1)?, row.get(2)?);
+            if self.excluded.is_some_and(|folder| folder.contains(&path)) {
+                continue;
+            }
             self.paths.insert(source_id, &path, file_id);
             let node = self.add_node(Node::Note(file_id));
             self.notes.insert(
@@ -156,6 +172,9 @@ impl Builder<'_> {
         while let Some(row) = rows.next()? {
             let (chunk_id, file_id, heading_path): (i64, i64, String) =
                 (row.get(0)?, row.get(1)?, row.get(2)?);
+            let Some(note_node) = self.notes.get(&file_id).map(|note| note.node) else {
+                continue;
+            };
             let key = NodeKey::section(file_id, row.get_ref(3)?.as_blob()?);
 
             // Chunks of one note with the same text are one section.
@@ -164,8 +183,7 @@ impl Builder<'_> {
                 None => {
                     let node = self.add_node(Node::Section(Section { chunk_id, file_id }));
                     self.keyed.insert(key, node);
-                    self.graph
-                        .add_edge(self.notes[&file_id].node, node, MEMBERSHIP_WEIGHT);
+                    self.graph.add_edge(note_node, node, MEMBERSHIP_WEIGHT);
                     node
                 }
             };

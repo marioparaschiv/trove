@@ -6,6 +6,8 @@
 //! dims (u32) and chunk count (u32), then per chunk: text hash (32 bytes), heading path length (u32) and UTF-8 bytes,
 //! span start and end (u64 each), and the vector as `dims` fp16 values.
 
+mod decisions;
+
 use std::{
     fs, io,
     io::Write,
@@ -16,6 +18,8 @@ use std::{
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
+
+pub use decisions::{Decision, DecisionError, SuggestionState, note_pair};
 
 const VECTORS_FOLDER: &str = "vectors";
 const EXTENSION: &str = "vec";
@@ -72,6 +76,13 @@ pub enum StoreError {
     },
     #[error("{path} is not a valid vector file: {reason}")]
     Malformed { path: PathBuf, reason: &'static str },
+    #[error("line {line} of {path} is not a valid decision")]
+    MalformedDecision {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: DecisionError,
+    },
 }
 
 impl SyncStore {
@@ -124,22 +135,7 @@ impl SyncStore {
             Err(source) => return Err(StoreError::Read { path, source }),
         }
 
-        let write_error = |source| StoreError::Write {
-            path: path.clone(),
-            source,
-        };
-        let folder = path
-            .parent()
-            .expect("vector files are inside a shard folder");
-        fs::create_dir_all(folder).map_err(write_error)?;
-        let mut temporary = NamedTempFile::new_in(folder).map_err(write_error)?;
-        temporary.write_all(&bytes).map_err(write_error)?;
-        temporary.flush().map_err(write_error)?;
-        temporary
-            .persist(&path)
-            .map_err(|error| write_error(error.error))?;
-
-        Ok(())
+        write_atomically(&path, &bytes)
     }
 
     /// Removes the note's vector file if there is one.
@@ -158,6 +154,24 @@ impl SyncStore {
         remove_conflict_copies_in(&self.root, &mut errors);
         errors
     }
+}
+
+/// Writes `bytes` to `path` through a temporary file in the same folder, so the file appears whole or not at all.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+    let write_error = |source| StoreError::Write {
+        path: path.to_path_buf(),
+        source,
+    };
+    let folder = path.parent().expect("store files are inside a folder");
+    fs::create_dir_all(folder).map_err(write_error)?;
+    let mut temporary = NamedTempFile::new_in(folder).map_err(write_error)?;
+    temporary.write_all(bytes).map_err(write_error)?;
+    temporary.flush().map_err(write_error)?;
+    temporary
+        .persist(path)
+        .map_err(|error| write_error(error.error))?;
+
+    Ok(())
 }
 
 fn remove_conflict_copies_in(folder: &Path, errors: &mut Vec<StoreError>) {
