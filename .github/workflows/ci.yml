@@ -7,6 +7,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: 1.97.1
+  BUN_VERSION: 1.4.2
+  NODE_VERSION: 24.21.0
 
 defaults:
   run:
@@ -102,3 +104,23 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+      # The client checks generate the API schema and run their tests against this build of trove.
+      - uses: oven-sh/setup-bun@v2.2.0
+        if: runner.os == 'Linux'
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v7.1.0
+        if: runner.os == 'Linux'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check the clients
+        if: runner.os == 'Linux'
+        working-directory: clients
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run lint
+          bun run test
