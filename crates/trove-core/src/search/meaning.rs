@@ -6,10 +6,10 @@ use crate::{
     index::{self, Index},
 };
 
-/// How many standard deviations above this query's average a chunk must score to count as a match. DigUp uses 2.0, but
-/// on the fixture vault's 26 chunks unrelated queries reach 2.4 while paraphrases score 2.6 and up. The eval sets the
-/// final value.
-const MIN_Z: f32 = 2.5;
+/// How many standard deviations above this query's average a chunk must score to count as a match. Set by the eval on
+/// the fixture vault's 34 chunks: the weakest wanted best match scores 2.47, while queries on topics the vault lacks
+/// top out at 2.27 (DigUp's 2.0 lets them through). Worth measuring again on a real vault, where z-scores spread wider.
+const MIN_Z: f32 = 2.35;
 
 /// Search by meaning: the query's cosine similarity to every chunk, put on this query's own scale (z-scores), so only
 /// chunks that clearly stand out match and a query that matches nothing finds nothing. Adds its matches, best first,

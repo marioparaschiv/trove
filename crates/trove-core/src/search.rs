@@ -4,7 +4,7 @@ mod meaning;
 mod request;
 mod words;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -30,6 +30,15 @@ pub struct Query {
 pub enum Signal {
     Meaning,
     Words,
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Meaning => "meaning",
+            Self::Words => "words",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

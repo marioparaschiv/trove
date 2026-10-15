@@ -1,13 +1,7 @@
-use std::sync::Mutex;
-
-use trove_core::{
-    embedder::Embedder,
-    index::Index,
-    search::{self, DEFAULT_LIMIT, SearchRequest, SearchResponse},
-};
+use trove_core::search::{DEFAULT_LIMIT, SearchRequest};
 
 use super::Context;
-use crate::service::Service;
+use crate::searcher::{Searcher, StageSwitches};
 
 #[derive(clap::Args)]
 pub struct Args {
@@ -18,22 +12,16 @@ pub struct Args {
     /// Print the results as JSON, as the HTTP API returns them
     #[arg(long)]
     json: bool,
+    #[command(flatten)]
+    stages: StageSwitches,
 }
 
 pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
-    let request = SearchRequest {
+    let response = Searcher::connect(ctx)?.search(&SearchRequest {
         query: args.query,
         limit: Some(args.limit),
-        skip: Default::default(),
-    };
-    let response: SearchResponse = match Service::connect(&ctx.data_dir)? {
-        Some(service) => service.post("/search", &request)?,
-        None => search::search(
-            &Mutex::new(Index::open(&ctx.data_dir)?),
-            &Embedder::from_config(&ctx.data_dir, &ctx.config),
-            &request,
-        )?,
-    };
+        skip: args.stages.skip(),
+    })?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&response)?);
@@ -49,7 +37,8 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
             target.push_str(" > ");
             target.push_str(heading);
         }
-        println!("{:>6.2}  {target}", result.score);
+        let why: Vec<String> = result.why.iter().map(ToString::to_string).collect();
+        println!("{:.4}  {target}  ({})", result.score, why.join(", "));
     }
 
     Ok(())
