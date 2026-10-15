@@ -76,11 +76,3 @@ CREATE TABLE communities (
     centrality REAL NOT NULL,
     PRIMARY KEY (level, id, member)
 ) STRICT;
-
-CREATE TABLE suggestions (
-    note_a INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
-    note_b INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
-    state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'dismissed')),
-    PRIMARY KEY (note_a, note_b),
-    CHECK (note_a < note_b)
-) STRICT;
