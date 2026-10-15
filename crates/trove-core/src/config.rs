@@ -7,7 +7,7 @@ use std::{
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::data_dir::DataDir;
+use crate::{data_dir::DataDir, model_setup::ModelFile};
 
 pub const CONFIG_FILE: &str = "config.toml";
 
@@ -18,6 +18,12 @@ pub struct Config {
     pub service_idle_timeout: Duration,
     pub index_debounce: Duration,
     pub store_folder: String,
+    /// The first wait between download retries; later ones double up to a minute.
+    pub download_retry_delay: Duration,
+    /// How long a download may wait for data before the attempt counts as failed and is retried.
+    pub download_idle_timeout: Duration,
+    /// The model `trove setup` installs. Defaults to the pinned EmbeddingGemma 2 file.
+    pub model: ModelFile,
 }
 
 impl Default for Config {
@@ -27,6 +33,9 @@ impl Default for Config {
             service_idle_timeout: Duration::from_secs(15 * 60),
             index_debounce: Duration::from_secs(30),
             store_folder: ".trove".to_owned(),
+            download_retry_delay: Duration::from_secs(2),
+            download_idle_timeout: Duration::from_secs(60),
+            model: ModelFile::pinned(),
         }
     }
 }
@@ -60,6 +69,20 @@ struct RawConfig {
     service_idle_timeout: Option<String>,
     index_debounce: Option<String>,
     store_folder: Option<String>,
+    download_retry_delay: Option<String>,
+    download_idle_timeout: Option<String>,
+    model: Option<RawModel>,
+}
+
+/// Every field is required: a model is identified by all of them together.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModel {
+    repo: String,
+    revision: String,
+    file: String,
+    size: u64,
+    sha256: String,
 }
 
 impl Config {
@@ -100,6 +123,22 @@ impl Config {
             store_folder: match raw.store_folder {
                 Some(name) => store_folder(&path, name)?,
                 None => defaults.store_folder,
+            },
+            download_retry_delay: timeout(
+                &path,
+                "download_retry_delay",
+                raw.download_retry_delay,
+                defaults.download_retry_delay,
+            )?,
+            download_idle_timeout: timeout(
+                &path,
+                "download_idle_timeout",
+                raw.download_idle_timeout,
+                defaults.download_idle_timeout,
+            )?,
+            model: match raw.model {
+                Some(model) => model_file(&path, model)?,
+                None => defaults.model,
             },
         })
     }
@@ -158,4 +197,71 @@ fn store_folder(path: &Path, name: String) -> Result<String, ConfigError> {
     };
 
     Err(invalid(path, "store_folder", reason))
+}
+
+fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
+    let is_name_char = |char: char| char.is_ascii_alphanumeric() || "._-".contains(char);
+    let is_name = |name: &str| {
+        !name.is_empty() && name != "." && name != ".." && name.chars().all(is_name_char)
+    };
+    let is_lower_hex = |text: &str, len: usize| {
+        text.len() == len
+            && text
+                .chars()
+                .all(|char| matches!(char, '0'..='9' | 'a'..='f'))
+    };
+
+    if !matches!(raw.repo.split_once('/'), Some((owner, name)) if is_name(owner) && is_name(name)) {
+        return Err(invalid(
+            path,
+            "model.repo",
+            format!("{:?} is not an `owner/name` repository", raw.repo),
+        ));
+    }
+
+    if !is_lower_hex(&raw.revision, 40) {
+        return Err(invalid(
+            path,
+            "model.revision",
+            format!(
+                "{:?} is not a 40-character lowercase hex commit",
+                raw.revision
+            ),
+        ));
+    }
+
+    if !is_name(&raw.file) {
+        return Err(invalid(
+            path,
+            "model.file",
+            format!("{:?} is not a plain file name", raw.file),
+        ));
+    }
+
+    if raw.size == 0 {
+        return Err(invalid(
+            path,
+            "model.size",
+            "must be greater than zero".to_owned(),
+        ));
+    }
+
+    if !is_lower_hex(&raw.sha256, 64) {
+        return Err(invalid(
+            path,
+            "model.sha256",
+            format!(
+                "{:?} is not a 64-character lowercase hex SHA-256",
+                raw.sha256
+            ),
+        ));
+    }
+
+    Ok(ModelFile {
+        repo: raw.repo,
+        revision: raw.revision,
+        file: raw.file,
+        size: raw.size,
+        sha256: raw.sha256,
+    })
 }

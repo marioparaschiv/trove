@@ -6,14 +6,12 @@ use std::{
     time::Duration,
 };
 
-use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
-use trove_core::embedder::{Embedder, Input, LLAMA_CPP_TAG, ModelEvent, vector_version};
-
-const MODEL_REPO_FOLDER: &str = "models--ggml-org--embeddinggemma-2-GGUF";
-const MODEL_REVISION: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
-const MODEL_FILE: &str = "embeddinggemma-2-Q8_0.gguf";
-const MODEL_SHA256: &str = "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135";
+use trove_core::{
+    data_dir::DataDir,
+    embedder::{Embedder, Input, LLAMA_CPP_TAG, ModelEvent, vector_version},
+    model_setup::{MODEL_FILE, MODEL_REPO, MODEL_REVISION, MODEL_SHA256, ModelFile, hf_hub_cache},
+};
 
 const REFERENCE_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/reference/vectors.json");
 const WRITE_REFERENCE_ENV: &str = "TROVE_WRITE_REFERENCE";
@@ -26,30 +24,27 @@ const EVENT_WAIT: Duration = Duration::from_secs(120);
 static EMBEDDER: LazyLock<Embedder> =
     LazyLock::new(|| Embedder::new(model_path(), Duration::from_secs(180)));
 
-/// The pinned model in the Hugging Face cache (`hf download ggml-org/embeddinggemma-2-GGUF embeddinggemma-2-Q8_0.gguf
-/// --revision bfcd298762cc34d0357ece5ebdd31791a3a374d8`).
+/// The pinned model where `trove setup` puts it in the data folder, or else in the Hugging Face cache.
 fn model_path() -> PathBuf {
-    let hub = env::var_os("HF_HUB_CACHE")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HF_HOME").map(|home| PathBuf::from(home).join("hub")))
-        .unwrap_or_else(|| {
-            BaseDirs::new()
-                .expect("no home folder")
-                .home_dir()
-                .join(".cache/huggingface/hub")
-        });
-    let path = hub
-        .join(MODEL_REPO_FOLDER)
-        .join("snapshots")
-        .join(MODEL_REVISION)
-        .join(MODEL_FILE);
-    assert!(
-        path.is_file(),
-        "model not found at {}: fetch it with `hf download ggml-org/embeddinggemma-2-GGUF {MODEL_FILE} --revision {MODEL_REVISION}`",
-        path.display()
-    );
+    let model = ModelFile::pinned();
+    let data_dir = DataDir::resolve().expect("data folder");
+    let candidates: Vec<PathBuf> = [
+        Some(model.path_in(&data_dir)),
+        hf_hub_cache().map(|hub| model.path_in_hf_cache(&hub)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
-    path
+    candidates
+        .iter()
+        .find(|path| path.is_file())
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "model not found at {candidates:?}: run `trove setup` or `hf download {MODEL_REPO} {MODEL_FILE} --revision {MODEL_REVISION}`"
+            )
+        })
 }
 
 fn reference_inputs() -> Vec<(&'static str, Input<'static>)> {

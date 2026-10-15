@@ -61,11 +61,7 @@ pub fn vector_version(model_sha256: &str) -> String {
         hasher.update(part);
     }
 
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex::encode(hasher.finalize())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
