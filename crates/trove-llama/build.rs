@@ -151,6 +151,8 @@ fn build_shared_with_runtime_backends(source: &Path, out_dir: &Path) {
         .define("BUILD_SHARED_LIBS", "ON")
         .define("GGML_BACKEND_DL", "ON")
         .define("GGML_CPU_ALL_VARIANTS", "ON")
+        // `llama` needs `ggml` beside it; a binary's RUNPATH doesn't apply to its libraries' own dependencies.
+        .define("CMAKE_INSTALL_RPATH", "$ORIGIN")
         .build();
 
     println!(
