@@ -1,9 +1,13 @@
+mod stats;
+
 use std::path::PathBuf;
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use thiserror::Error;
 
 use crate::data_dir::DataDir;
+
+pub use stats::IndexStats;
 
 pub const INDEX_FILE: &str = "index.sqlite";
 pub const SCHEMA_VERSION: u32 = 1;
