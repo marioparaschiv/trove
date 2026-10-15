@@ -11,7 +11,7 @@ use axum::{
 
 use super::{
     AppState,
-    error::{ApiError, ErrorBody},
+    error::{ApiError, ErrorBody, blocking},
     openapi::Rejected,
 };
 use crate::categories::{
@@ -50,11 +50,10 @@ pub(super) async fn categories(
     request: Result<Query<CategoriesRequest>, QueryRejection>,
 ) -> Result<Json<CategoriesResponse>, ApiError> {
     let Query(request) = request?;
-    let response = tokio::task::spawn_blocking(move || {
+    let response = blocking(move || {
         categories::categories(&state.index, &state.config.store_folder, &request)
     })
-    .await
-    .map_err(|error| ApiError::internal(&error))??;
+    .await?;
 
     Ok(Json(response))
 }
@@ -78,11 +77,7 @@ pub(super) async fn pin(
     request: Result<Json<CategoryPins>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let Json(request) = request?;
-    tokio::task::spawn_blocking(move || {
-        categories::pin(&state.index, &state.config.store_folder, request)
-    })
-    .await
-    .map_err(|error| ApiError::internal(&error))??;
+    blocking(move || categories::pin(&state.index, &state.config.store_folder, request)).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

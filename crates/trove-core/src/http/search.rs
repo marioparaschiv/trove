@@ -4,7 +4,7 @@ use axum::{Json, extract::State, extract::rejection::JsonRejection, http::Status
 
 use super::{
     AppState,
-    error::{ApiError, ErrorBody},
+    error::{ApiError, ErrorBody, blocking},
     openapi::Rejected,
 };
 use crate::search::{self, SearchError, SearchRequest, SearchResponse};
@@ -37,11 +37,8 @@ pub(super) async fn search(
     request: Result<Json<SearchRequest>, JsonRejection>,
 ) -> Result<Json<SearchResponse>, ApiError> {
     let Json(request) = request?;
-    let response = tokio::task::spawn_blocking(move || {
-        search::search(&state.index, &state.embedder, &request)
-    })
-    .await
-    .map_err(|error| ApiError::internal(&error))??;
+    let response =
+        blocking(move || search::search(&state.index, &state.embedder, &request)).await?;
 
     Ok(Json(response))
 }

@@ -8,7 +8,7 @@ use axum::{
 
 use super::{
     AppState,
-    error::{ApiError, ErrorBody},
+    error::{ApiError, ErrorBody, blocking},
     openapi::Rejected,
 };
 use crate::{
@@ -46,9 +46,7 @@ pub(super) async fn related(
     request: Result<Query<RelatedRequest>, QueryRejection>,
 ) -> Result<Json<SearchResponse>, ApiError> {
     let Query(request) = request?;
-    let response = tokio::task::spawn_blocking(move || related::related(&state.index, &request))
-        .await
-        .map_err(|error| ApiError::internal(&error))??;
+    let response = blocking(move || related::related(&state.index, &request)).await?;
 
     Ok(Json(response))
 }

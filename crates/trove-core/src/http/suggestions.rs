@@ -11,7 +11,7 @@ use axum::{
 
 use super::{
     AppState,
-    error::{ApiError, ErrorBody},
+    error::{ApiError, ErrorBody, blocking},
     openapi::Rejected,
 };
 use crate::suggestions::{
@@ -53,11 +53,10 @@ pub(super) async fn suggestions(
     request: Result<Query<SuggestionsRequest>, QueryRejection>,
 ) -> Result<Json<SuggestionsResponse>, ApiError> {
     let Query(request) = request?;
-    let response = tokio::task::spawn_blocking(move || {
+    let response = blocking(move || {
         suggestions::suggestions(&state.index, &state.config.store_folder, &request)
     })
-    .await
-    .map_err(|error| ApiError::internal(&error))??;
+    .await?;
 
     Ok(Json(response))
 }
@@ -81,11 +80,8 @@ pub(super) async fn decide(
     request: Result<Json<SuggestionDecision>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let Json(request) = request?;
-    tokio::task::spawn_blocking(move || {
-        suggestions::decide(&state.index, &state.config.store_folder, &request)
-    })
-    .await
-    .map_err(|error| ApiError::internal(&error))??;
+    blocking(move || suggestions::decide(&state.index, &state.config.store_folder, &request))
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -108,10 +104,7 @@ pub(super) async fn orphans(
     request: Result<Query<OrphansRequest>, QueryRejection>,
 ) -> Result<Json<OrphansResponse>, ApiError> {
     let Query(request) = request?;
-    let response =
-        tokio::task::spawn_blocking(move || suggestions::orphans(&state.index, &request))
-            .await
-            .map_err(|error| ApiError::internal(&error))??;
+    let response = blocking(move || suggestions::orphans(&state.index, &request)).await?;
 
     Ok(Json(response))
 }

@@ -40,6 +40,22 @@ impl ApiError {
     }
 }
 
+/// Runs blocking work off the async runtime, turning its error, or a panic, into an `ApiError`.
+pub(crate) async fn blocking<T, E>(
+    work: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    E: Send + 'static,
+    ApiError: From<E>,
+{
+    let result = tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| ApiError::internal(&error))?;
+
+    Ok(result?)
+}
+
 // Every malformed request is a 400 with an `ErrorBody`, so clients handle one shape.
 impl From<JsonRejection> for ApiError {
     fn from(rejection: JsonRejection) -> Self {

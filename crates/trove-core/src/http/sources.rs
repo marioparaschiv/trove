@@ -13,7 +13,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{
     AppState,
-    error::{ApiError, ErrorBody},
+    error::{ApiError, ErrorBody, blocking},
     openapi::Rejected,
 };
 use crate::index::{self, Index, Source, SourceError};
@@ -117,9 +117,6 @@ async fn with_index<T: Send + 'static>(
     work: impl FnOnce(&mut Index) -> Result<T, SourceError> + Send + 'static,
 ) -> Result<T, ApiError> {
     let state = Arc::clone(state);
-    let result = tokio::task::spawn_blocking(move || work(&mut index::lock(&state.index)))
-        .await
-        .map_err(|error| ApiError::internal(&error))?;
 
-    Ok(result?)
+    blocking(move || work(&mut index::lock(&state.index))).await
 }
