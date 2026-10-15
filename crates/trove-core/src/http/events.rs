@@ -32,6 +32,11 @@ pub enum Event {
     IndexFailed {
         message: String,
     },
+    /// Vector files that arrived in a store folder were imported for their notes, without the model. `report.files`
+    /// counts the notes imported. Sent only when a note was imported or something went wrong.
+    VectorsImported {
+        report: IndexReport,
+    },
     /// The service is shutting down. It is the last event on the stream.
     Stopping,
 }

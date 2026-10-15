@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
 };
 
 use axum::{Json, extract::State, extract::rejection::JsonRejection};
@@ -126,6 +129,32 @@ impl Job {
 impl Drop for Job {
     fn drop(&mut self) {
         self.state.indexing.jobs.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Imports the vector files at `paths` once no index run is running, reporting on the events stream, and failures
+/// also on stderr.
+pub(super) async fn import_vector_files(state: &Arc<AppState>, paths: Vec<PathBuf>) {
+    let _activity = state.activity.begin();
+    let _turn = state.indexing.turn.lock().await;
+
+    let blocking_state = Arc::clone(state);
+    let result = tokio::task::spawn_blocking(move || {
+        let state = blocking_state;
+        indexer::import_vector_files(&state.index, &state.embedder, &state.config, &paths)
+    })
+    .await
+    .map_err(JobError::Panic)
+    .and_then(|result| Ok(result?));
+
+    match result {
+        Ok(report) if report.files == 0 && report.problems.is_empty() => {}
+        Ok(report) => state.publish(Event::VectorsImported { report }),
+        Err(error) => {
+            let message = full_message(&error);
+            eprintln!("importing vector files failed: {message}");
+            state.publish(Event::IndexFailed { message });
+        }
     }
 }
 

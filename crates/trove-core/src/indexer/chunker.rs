@@ -9,7 +9,8 @@ use crate::embedder::{CONTEXT_TOKENS, Embedder, Input};
 const HEADING_SEPARATOR: &str = " > ";
 
 /// Splits a note into one chunk per heading section, and a section too long for the model's context into chunks of
-/// whole paragraphs, then writes `chunks` and `chunks_fts`. Counting tokens loads the model.
+/// whole paragraphs, then writes `chunks` and `chunks_fts`. Counting tokens loads the model, so a
+/// note whose chunks the sync store holds takes them from there.
 pub struct Chunker {
     embedder: Arc<Embedder>,
 }
@@ -63,6 +64,22 @@ impl Chunker {
 
         Ok(pieces)
     }
+
+    fn split(&self, note: &NoteFile<'_>) -> Result<Vec<Chunk>, IndexerError> {
+        let mut chunks = Vec::new();
+        for section in sections(note.text) {
+            let title = document_title(note.title, &section.heading_path);
+            for (span, token_count) in self.fit(note.text, &title, section.span)? {
+                chunks.push(Chunk {
+                    heading_path: section.heading_path.clone(),
+                    span,
+                    token_count: Some(token_count),
+                });
+            }
+        }
+
+        Ok(chunks)
+    }
 }
 
 /// The title in a chunk's document prompt: its heading path, or the note title for text before the first heading.
@@ -91,29 +108,42 @@ impl FileProcessor for Chunker {
             "INSERT INTO chunks_fts (rowid, title, heading_path, text) VALUES (?1, ?2, ?3, ?4)",
         )?;
 
-        let mut ordinal = 0;
-        for section in sections(note.text) {
-            let title = document_title(note.title, &section.heading_path);
-            for (span, token_count) in self.fit(note.text, &title, section.span)? {
-                let text = &note.text[span.clone()];
-                let text_hash = Sha256::digest(text.as_bytes());
+        let chunks = match note.stored_chunks {
+            Some(stored) => stored
+                .iter()
+                .map(|chunk| Chunk {
+                    heading_path: chunk.heading_path.clone(),
+                    span: chunk.span.clone(),
+                    token_count: None,
+                })
+                .collect(),
+            None => self.split(note)?,
+        };
 
-                let chunk_id = insert_chunk.insert((
-                    note.id,
-                    ordinal,
-                    &section.heading_path,
-                    span.start,
-                    span.end,
-                    token_count,
-                    text_hash.as_slice(),
-                ))?;
-                insert_fts.execute((chunk_id, note.title, &section.heading_path, text))?;
-                ordinal += 1;
-            }
+        for (ordinal, chunk) in chunks.iter().enumerate() {
+            let text = &note.text[chunk.span.clone()];
+            let text_hash = Sha256::digest(text.as_bytes());
+
+            let chunk_id = insert_chunk.insert((
+                note.id,
+                ordinal,
+                &chunk.heading_path,
+                chunk.span.start,
+                chunk.span.end,
+                chunk.token_count,
+                text_hash.as_slice(),
+            ))?;
+            insert_fts.execute((chunk_id, note.title, &chunk.heading_path, text))?;
         }
 
         Ok(())
     }
+}
+
+struct Chunk {
+    heading_path: String,
+    span: Range<usize>,
+    token_count: Option<usize>,
 }
 
 fn sections(text: &str) -> Vec<Section> {
