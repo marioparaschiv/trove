@@ -6,27 +6,34 @@ const NOTE_SUFFIX: &str = ".md";
 /// relative to the linking note, from the source's root, or by file name (nearest first).
 #[derive(Default)]
 pub(super) struct NotePaths {
-    /// Per source id: each note's comparable path and file id.
-    by_source: HashMap<i64, Vec<(String, i64)>>,
+    by_source: HashMap<i64, SourceNotes>,
+}
+
+/// The notes of one source by comparable path.
+#[derive(Default)]
+struct SourceNotes {
+    /// The first note inserted at each comparable path, as two notes may differ only in case.
+    by_path: HashMap<String, i64>,
+    /// Every note's comparable path and file id, by the last part of its path.
+    by_name: HashMap<String, Vec<(String, i64)>>,
 }
 
 impl NotePaths {
     pub(super) fn insert(&mut self, source_id: i64, path: &str, file_id: i64) {
-        self.by_source
-            .entry(source_id)
+        let notes = self.by_source.entry(source_id).or_default();
+        let path = comparable(path);
+        notes.by_path.entry(path.clone()).or_insert(file_id);
+        notes
+            .by_name
+            .entry(name(&path).to_owned())
             .or_default()
-            .push((comparable(path), file_id));
+            .push((path, file_id));
     }
 
     /// The note in `source_id` that `target` names when written in the note at `from`.
     pub(super) fn resolve(&self, source_id: i64, from: &str, target: &str) -> Option<i64> {
         let notes = self.by_source.get(&source_id)?;
-        let exact = |path: &str| {
-            notes
-                .iter()
-                .find(|(note, _)| note == path)
-                .map(|&(_, file_id)| file_id)
-        };
+        let exact = |path: &str| notes.by_path.get(path).copied();
 
         let target = comparable(target.trim());
         if target.is_empty() {
@@ -50,6 +57,8 @@ impl NotePaths {
 
         let suffix = format!("/{target}");
         notes
+            .by_name
+            .get(name(&target))?
             .iter()
             .filter(|(note, _)| note.ends_with(&suffix))
             .min_by_key(|(note, _)| (folder(note) != from_folder, note.len(), note.as_str()))
@@ -64,6 +73,10 @@ fn comparable(path: &str) -> String {
         Some(stem) => stem.to_owned(),
         None => lower,
     }
+}
+
+fn name(path: &str) -> &str {
+    path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
 fn folder(path: &str) -> &str {

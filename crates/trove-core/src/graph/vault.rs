@@ -19,6 +19,17 @@ pub(crate) enum Node {
     Tag,
 }
 
+impl Node {
+    /// The note the node belongs to, by file id; `None` for a tag.
+    pub(crate) fn file_id(self) -> Option<i64> {
+        match self {
+            Self::Note(file_id) => Some(file_id),
+            Self::Section(section) => Some(section.file_id),
+            Self::Tag => None,
+        }
+    }
+}
+
 /// A section node: the chunk it stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Section {
@@ -66,6 +77,7 @@ impl VaultGraph {
             keyed: HashMap::new(),
             chunk_nodes: HashMap::new(),
             headings: HashMap::new(),
+            block_texts: HashMap::new(),
         };
         builder.add_notes()?;
         builder.add_sections()?;
@@ -96,17 +108,16 @@ impl VaultGraph {
     /// Each note's share of `ranks`, a walk over [`Self::graph`], by file id.
     pub(crate) fn note_ranks(&self, ranks: &[f32]) -> BTreeMap<i64, NoteRank> {
         let mut notes: BTreeMap<i64, NoteRank> = BTreeMap::new();
-        for (node, &rank) in self.nodes.iter().zip(ranks) {
-            match *node {
-                Node::Note(file_id) => notes.entry(file_id).or_default().rank += rank,
-                Node::Section(section) => {
-                    let note = notes.entry(section.file_id).or_default();
-                    note.rank += rank;
-                    if note.best_section.is_none_or(|(_, best)| rank > best) {
-                        note.best_section = Some((section.chunk_id, rank));
-                    }
-                }
-                Node::Tag => {}
+        for (&node, &rank) in self.nodes.iter().zip(ranks) {
+            let Some(file_id) = node.file_id() else {
+                continue;
+            };
+            let note = notes.entry(file_id).or_default();
+            note.rank += rank;
+            if let Node::Section(section) = node
+                && note.best_section.is_none_or(|(_, best)| rank > best)
+            {
+                note.best_section = Some((section.chunk_id, rank));
             }
         }
 
@@ -132,6 +143,8 @@ struct Builder<'a> {
     chunk_nodes: HashMap<i64, usize>,
     /// Each note's chunks in order, with their heading paths.
     headings: HashMap<i64, Vec<(i64, String)>>,
+    /// The chunks in order, with their texts, of the notes a block link names.
+    block_texts: HashMap<i64, Vec<(i64, String)>>,
 }
 
 impl Builder<'_> {
@@ -206,6 +219,7 @@ impl Builder<'_> {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })?
             .collect::<rusqlite::Result<_>>()?;
+        self.load_block_texts(&rows)?;
 
         let mut edges: HashMap<(usize, usize, EdgeKind), f32> = HashMap::new();
         let mut citations = BTreeSet::new();
@@ -218,7 +232,7 @@ impl Builder<'_> {
             };
             let to = match (&src, &dst) {
                 (NodeKey::Note(file_id), NodeKey::Link(target)) => {
-                    let Some((target_file, node)) = self.resolve(*file_id, target)? else {
+                    let Some((target_file, node)) = self.resolve(*file_id, target) else {
                         continue;
                     };
                     if target_file != *file_id {
@@ -268,15 +282,12 @@ impl Builder<'_> {
 
     /// The note a link target written in note `from` names, and the node it lands on: the section of its heading or
     /// block when it names one that exists, else the note.
-    fn resolve(&self, from: i64, target: &str) -> rusqlite::Result<Option<(i64, usize)>> {
-        let note = &self.notes[&from];
+    fn resolve(&self, from: i64, target: &str) -> Option<(i64, usize)> {
         let (path, subpath) = target.split_once('#').unwrap_or((target, ""));
-        let Some(file_id) = self.paths.resolve(note.source_id, &note.path, path) else {
-            return Ok(None);
-        };
+        let file_id = self.resolve_note(from, path)?;
 
         let chunk_id = match subpath.strip_prefix('^') {
-            Some(block) => self.block_chunk(file_id, block)?,
+            Some(block) => self.block_chunk(file_id, block),
             None => heading_chunk(
                 self.headings.get(&file_id).map_or(&[], Vec::as_slice),
                 subpath,
@@ -287,32 +298,71 @@ impl Builder<'_> {
             .copied()
             .unwrap_or(self.notes[&file_id].node);
 
-        Ok(Some((file_id, node)))
+        Some((file_id, node))
+    }
+
+    /// The note a link path written in note `from` names.
+    fn resolve_note(&self, from: i64, path: &str) -> Option<i64> {
+        let note = &self.notes[&from];
+
+        self.paths.resolve(note.source_id, &note.path, path)
+    }
+
+    /// Loads the chunk texts of every note that a block link among `edges` names, in one query.
+    fn load_block_texts(
+        &mut self,
+        edges: &[(NodeKey, NodeKey, EdgeKind, f32)],
+    ) -> rusqlite::Result<()> {
+        let file_ids: BTreeSet<i64> = edges
+            .iter()
+            .filter_map(|(src, dst, _, _)| match (src, dst) {
+                (NodeKey::Note(file_id), NodeKey::Link(target))
+                    if self.notes.contains_key(file_id) =>
+                {
+                    let (path, block) = target.split_once("#^")?;
+                    (!block.is_empty()).then(|| self.resolve_note(*file_id, path))?
+                }
+                _ => None,
+            })
+            .collect();
+        if file_ids.is_empty() {
+            return Ok(());
+        }
+
+        let file_ids = serde_json::to_string(&file_ids).expect("a list of ids serialises");
+        let mut statement = self.conn.prepare(
+            "SELECT c.file_id, c.id, t.text FROM chunks c JOIN chunks_fts t ON t.rowid = c.id
+             WHERE c.file_id IN (SELECT value FROM json_each(?1)) ORDER BY c.file_id, c.ordinal",
+        )?;
+        let mut rows = statement.query([file_ids])?;
+        while let Some(row) = rows.next()? {
+            self.block_texts
+                .entry(row.get(0)?)
+                .or_default()
+                .push((row.get(1)?, row.get(2)?));
+        }
+
+        Ok(())
     }
 
     /// The first chunk of a note with a line ending in the block id `^block`.
-    fn block_chunk(&self, file_id: i64, block: &str) -> rusqlite::Result<Option<i64>> {
+    fn block_chunk(&self, file_id: i64, block: &str) -> Option<i64> {
         let marker = format!("^{block}");
-        let mut statement = self.conn.prepare_cached(
-            "SELECT c.id, t.text FROM chunks c JOIN chunks_fts t ON t.rowid = c.id
-             WHERE c.file_id = ?1 ORDER BY c.ordinal",
-        )?;
-        let mut rows = statement.query([file_id])?;
-        while let Some(row) = rows.next()? {
-            let text: String = row.get(1)?;
-            let has_block = text.lines().any(|line| {
+        let has_block = |text: &str| {
+            text.lines().any(|line| {
                 let line = line.trim_end();
                 line == marker
                     || line
                         .strip_suffix(&marker)
                         .is_some_and(|before| before.ends_with(char::is_whitespace))
-            });
-            if has_block {
-                return Ok(Some(row.get(0)?));
-            }
-        }
+            })
+        };
 
-        Ok(None)
+        self.block_texts
+            .get(&file_id)?
+            .iter()
+            .find(|(_, text)| has_block(text))
+            .map(|&(chunk_id, _)| chunk_id)
     }
 
     /// Co-citation (two notes linked from the same notes) and coupling (two notes linking to the same notes).
