@@ -14,6 +14,7 @@ use crate::data_dir::DataDir;
 
 pub use sources::{Source, SourceError};
 pub use stats::IndexStats;
+pub(crate) use vectors::SectionVector;
 
 pub const INDEX_FILE: &str = "index.sqlite";
 pub const SCHEMA_VERSION: u32 = 1;

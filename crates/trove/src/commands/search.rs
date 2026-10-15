@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use trove_core::{
     embedder::Embedder,
     index::Index,
-    search::{self, DEFAULT_LIMIT, SearchRequest, SearchResponse},
+    search::{self, DEFAULT_LIMIT, SearchRequest, SearchResponse, Signal},
 };
 
 use super::Context;
@@ -18,12 +18,16 @@ pub struct Args {
     /// Print the results as JSON, as the HTTP API returns them
     #[arg(long)]
     json: bool,
+    /// Leave out the graph rerank
+    #[arg(long)]
+    no_graph: bool,
 }
 
 pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
     let request = SearchRequest {
         query: args.query,
         limit: Some(args.limit),
+        skip: args.no_graph.then_some(Signal::Graph).into_iter().collect(),
     };
     let response: SearchResponse = match Service::connect(&ctx.data_dir)? {
         Some(service) => service.post("/search", &request)?,

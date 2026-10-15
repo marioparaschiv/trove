@@ -128,13 +128,7 @@ fn sections(text: &str) -> Vec<Section> {
         let line_end = line_start + line.len();
         let content = line.trim_end();
 
-        if let Some(marker) = Fence::parse(content) {
-            fence = match fence {
-                None => Some(marker),
-                Some(open) if marker.closes(&open) => None,
-                open => open,
-            };
-        } else if fence.is_none()
+        if !Fence::track(&mut fence, content)
             && let Some((level, title)) = atx_heading(content)
         {
             push_section(&mut sections, text, &headings, section_start..line_start);
@@ -230,7 +224,7 @@ fn atx_heading(line: &str) -> Option<(usize, &str)> {
     Some((level, title))
 }
 
-struct Fence {
+pub(super) struct Fence {
     marker: u8,
     len: usize,
     has_info: bool,
@@ -261,6 +255,22 @@ impl Fence {
             len,
             has_info: !unindented[len..].trim().is_empty(),
         })
+    }
+
+    /// Follows fenced code from line to line: updates `open` for `line` and returns whether the line is a fence or
+    /// inside one.
+    pub(super) fn track(open: &mut Option<Fence>, line: &str) -> bool {
+        let Some(marker) = Self::parse(line) else {
+            return open.is_some();
+        };
+
+        *open = match open.take() {
+            None => Some(marker),
+            Some(current) if marker.closes(&current) => None,
+            current => current,
+        };
+
+        true
     }
 
     fn closes(&self, open: &Fence) -> bool {

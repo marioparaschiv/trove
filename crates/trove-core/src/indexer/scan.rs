@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
-use super::{Indexer, IndexerError, NoteFile, embed::embed_missing, frontmatter::properties};
+use super::{
+    Indexer, IndexerError, NoteFile, embed::embed_missing, frontmatter::properties,
+    neighbours::update_graph_edges,
+};
 use crate::{
     config::Config,
     embedder::{Embedder, vector_version},
@@ -79,6 +82,7 @@ pub fn index_sources(
         index_source(index, &indexer, source, config, &mut report)?;
     }
     report.embedded = embed_missing(index, embedder)?;
+    update_graph_edges(index)?;
 
     Ok(report)
 }
