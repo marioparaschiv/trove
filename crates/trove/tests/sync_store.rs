@@ -21,7 +21,7 @@ const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter
 /// Where a vector file holds its `vector_version`: after the 8-byte magic and the 4-byte format version.
 const VECTOR_VERSION_BYTES: Range<usize> = 12..76;
 /// Where the records start: after the magic, format version, `vector_version`, content hash, dims and chunk count.
-const RECORDS_START: usize = 116;
+const RECORDS_START: usize = VECTOR_VERSION_BYTES.end + 32 + 4 + 4;
 const OTHER_NOTE: &str = "Engineering/Retry backoff.md";
 
 /// Every file in the store folder by its path inside it.
@@ -131,8 +131,7 @@ fn a_second_device_imports_the_vectors_without_embedding() {
 #[test]
 fn a_vector_file_from_another_vector_version_is_ignored_and_replaced() {
     let vault = vault_copy();
-    let first = indexed(vault.path());
-    let (_, all_chunks) = index_counts(&run(first.path(), &["index", "--reembed"]));
+    indexed(vault.path());
     let path = vector_file(vault.path(), PARAPHRASE_NOTE);
     let original = fs::read(&path).unwrap();
     let mut other_version = original.clone();
@@ -143,9 +142,10 @@ fn a_vector_file_from_another_vector_version_is_ignored_and_replaced() {
     run(second.path(), &["sources", "add", path_str(vault.path())]);
     let (_, embedded) = index_counts(&run(second.path(), &["index"]));
 
-    assert!(
-        embedded > 0 && embedded < all_chunks,
-        "only that note is embedded: {embedded} of {all_chunks}"
+    assert_eq!(
+        embedded,
+        vector_ranges(&original).len() as u64,
+        "only that note is embedded"
     );
     assert_eq!(
         fs::read(&path).unwrap()[VECTOR_VERSION_BYTES],

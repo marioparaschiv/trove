@@ -16,6 +16,7 @@ fn personalized_pagerank_matches_the_exact_ranks_of_a_small_graph() {
 
     let ranks = graph.personalized_pagerank(&[(0, 1.0)]);
 
+    assert_eq!(ranks.len(), 4, "{ranks:?}");
     let exact = [111080.0, 101541.0, 127840.0, 27166.0].map(|count| count / 367627.0);
     for (rank, exact) in ranks.iter().zip(exact) {
         assert!((rank - exact).abs() < 1e-4, "{ranks:?} against {exact}");

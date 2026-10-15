@@ -66,15 +66,22 @@ fn similar_unlinked_notes_are_suggested_until_linked_or_decided() {
         "/suggestions?source={}",
         percent_encode(path_str(vault.path()))
     );
-    let (_, response) = serve.call("GET", &path, None);
+    let (status, response) = serve.call("GET", &path, None);
+    assert_eq!(status, 200, "{response}");
     let suggestion = &response["suggestions"][0];
     assert_eq!(suggestion["note"]["path"], ESPRESSO, "{response}");
     assert_eq!(suggestion["note"]["title"], "Espresso");
     assert_eq!(suggestion["note"]["source"], path_str(vault.path()));
     assert_eq!(suggestion["target"]["path"], POUR_OVER);
+    let similarities: Vec<f64> = response["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|suggestion| suggestion["similarity"].as_f64().unwrap())
+        .collect();
     assert!(
-        suggestion["similarity"].as_f64().unwrap() > 0.78,
-        "{response}"
+        similarities.is_sorted_by(|a, b| a >= b),
+        "most similar first: {response}"
     );
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, LISBON));
 
@@ -85,6 +92,7 @@ fn similar_unlinked_notes_are_suggested_until_linked_or_decided() {
     index(&serve);
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
     decide(&serve, vault.path(), POUR_OVER, ESPRESSO, "accepted");
+    assert_eq!(merged_state(vault.path()), Some(SuggestionState::Accepted));
 
     serve.stop();
 }
