@@ -1,3 +1,4 @@
+import { failure } from "@trove/client";
 import { type App, Modal, Notice } from "obsidian";
 import type { CategoryEdits } from "./category-edits.ts";
 import {
@@ -8,7 +9,7 @@ import {
   type NoteState,
   planCategories,
 } from "./category-notes.ts";
-import { connectTo, failure, message, vaultSource } from "./connection.ts";
+import { connectTo, message, vaultSource } from "./connection.ts";
 import type TrovePlugin from "./main.ts";
 import { isSameFolder } from "./suggestions.ts";
 

@@ -1,6 +1,6 @@
 import { Action, ActionPanel, getPreferenceValues, List } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
-import { connect, type TroveClient } from "@trove/client";
+import { connect, failure, type TroveClient } from "@trove/client";
 import { useRef, useState } from "react";
 import { obsidianUrl } from "./obsidian-url.ts";
 
@@ -29,12 +29,12 @@ function Results({ client, query, onQueryChange }: ResultsProps) {
   const hasQuery = query.trim() !== "";
   const { data, isLoading } = usePromise(
     async (text: string) => {
-      const { data, error } = await client.POST("/search", {
+      const { data, error, response } = await client.POST("/search", {
         body: { query: text },
         signal: abortable.current?.signal,
       });
       if (data === undefined) {
-        throw new Error(error.error);
+        throw failure("search", response, error);
       }
 
       return data.results;

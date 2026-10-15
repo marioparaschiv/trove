@@ -1,6 +1,6 @@
-import type { Schemas, TroveClient } from "@trove/client";
+import { failure, type Schemas, type TroveClient } from "@trove/client";
 import { type App, Modal, Notice, Setting } from "obsidian";
-import { connectTo, failure, message, vaultSource } from "./connection.ts";
+import { connectTo, message, vaultSource } from "./connection.ts";
 import { appendLink } from "./links.ts";
 
 type Suggestion = Schemas["Suggestion"];

@@ -1,3 +1,4 @@
+import { failure } from "@trove/client";
 import { type App, FuzzySuggestModal, Notice, type TAbstractFile, TFile } from "obsidian";
 import { noteState } from "./categories.ts";
 import { linkTo, type NoteState } from "./category-notes.ts";
@@ -9,7 +10,7 @@ import {
   renamedStates,
   renamePin,
 } from "./category-pins.ts";
-import { connectTo, failure, message, vaultSource } from "./connection.ts";
+import { connectTo, message, vaultSource } from "./connection.ts";
 import type TrovePlugin from "./main.ts";
 
 /**

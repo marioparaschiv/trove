@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { defaultDataDir } from "@trove/client";
+import { defaultDataDir, failure } from "@trove/client";
 import { Notice, requestUrl } from "obsidian";
-import { connectTo, failure, vaultSource } from "./connection.ts";
+import { connectTo, vaultSource } from "./connection.ts";
 import {
   assetUrl,
   binaryPath,

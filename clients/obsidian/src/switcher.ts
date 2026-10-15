@@ -1,4 +1,4 @@
-import type { TroveClient } from "@trove/client";
+import { failure, type TroveClient } from "@trove/client";
 import {
   type App,
   debounce,
@@ -10,7 +10,7 @@ import {
   renderResults,
   SuggestModal,
 } from "obsidian";
-import { connectTo, failure, message, noteLink, vaultSource } from "./connection.ts";
+import { connectTo, message, noteLink, vaultSource } from "./connection.ts";
 import {
   type FileSuggestion,
   inVault,
