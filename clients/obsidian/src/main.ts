@@ -1,4 +1,7 @@
 import { FileSystemAdapter, Notice, Plugin } from "obsidian";
+import { message } from "./connection.ts";
+import { prepareTrove } from "./first-run.ts";
+import { RelatedNotes } from "./related.ts";
 import { DEFAULT_SETTINGS, parseSettings, type Settings } from "./settings.ts";
 import { TroveSettingTab } from "./settings-tab.ts";
 import { Switcher } from "./switcher.ts";
@@ -10,7 +13,7 @@ export default class TrovePlugin extends Plugin {
     try {
       this.settings = parseSettings(await this.loadData());
     } catch (error) {
-      new Notice(`Trove: ${error instanceof Error ? error.message : String(error)}`);
+      new Notice(`Trove: ${message(error)}`);
       throw error;
     }
 
@@ -20,12 +23,17 @@ export default class TrovePlugin extends Plugin {
     }
 
     const vaultPath = adapter.getBasePath();
+    const binary = new Promise<void>((resolve) => this.app.workspace.onLayoutReady(resolve)).then(
+      () => prepareTrove(this.settings, vaultPath),
+    );
+    binary.catch((error: unknown) => new Notice(`Trove: ${message(error)}`, 0));
 
     this.addCommand({
       id: "open-switcher",
       name: "Open quick switcher",
-      callback: () => new Switcher(this.app, this.settings.binaryPath, vaultPath).open(),
+      callback: () => new Switcher(this.app, binary, vaultPath).open(),
     });
+    new RelatedNotes(this, binary, vaultPath).register();
     this.addSettingTab(new TroveSettingTab(this.app, this));
   }
 }

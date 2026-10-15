@@ -33,6 +33,15 @@ pub(crate) struct VaultGraph {
     /// What each node of `graph` stands for.
     pub(crate) nodes: Vec<Node>,
     chunk_nodes: HashMap<i64, usize>,
+    note_nodes: HashMap<i64, usize>,
+}
+
+/// A note's share of a walk: the rank of its note node and sections together, and its best-ranked section.
+#[derive(Debug, Default)]
+pub(crate) struct NoteRank {
+    pub(crate) rank: f32,
+    /// The chunk of the best-ranked section and its rank.
+    pub(crate) best_section: Option<(i64, f32)>,
 }
 
 impl VaultGraph {
@@ -53,6 +62,11 @@ impl VaultGraph {
         builder.add_shared_links(&citations);
 
         Ok(Self {
+            note_nodes: builder
+                .notes
+                .iter()
+                .map(|(&file_id, note)| (file_id, note.node))
+                .collect(),
             graph: builder.graph,
             nodes: builder.nodes,
             chunk_nodes: builder.chunk_nodes,
@@ -61,6 +75,30 @@ impl VaultGraph {
 
     pub(crate) fn chunk_node(&self, chunk_id: i64) -> Option<usize> {
         self.chunk_nodes.get(&chunk_id).copied()
+    }
+
+    pub(crate) fn note_node(&self, file_id: i64) -> Option<usize> {
+        self.note_nodes.get(&file_id).copied()
+    }
+
+    /// Each note's share of `ranks`, a walk over [`Self::graph`], by file id.
+    pub(crate) fn note_ranks(&self, ranks: &[f32]) -> BTreeMap<i64, NoteRank> {
+        let mut notes: BTreeMap<i64, NoteRank> = BTreeMap::new();
+        for (node, &rank) in self.nodes.iter().zip(ranks) {
+            match *node {
+                Node::Note(file_id) => notes.entry(file_id).or_default().rank += rank,
+                Node::Section(section) => {
+                    let note = notes.entry(section.file_id).or_default();
+                    note.rank += rank;
+                    if note.best_section.is_none_or(|(_, best)| rank > best) {
+                        note.best_section = Some((section.chunk_id, rank));
+                    }
+                }
+                Node::Tag => {}
+            }
+        }
+
+        notes
     }
 }
 

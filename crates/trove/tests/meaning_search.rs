@@ -3,8 +3,8 @@ mod common;
 use std::{collections::HashSet, fs, path::Path};
 
 use common::{
-    FIXTURE_VAULT, Serve, data_dir_with_model, indexed, path_str, result_paths, run, search, trove,
-    vault_copy,
+    FIXTURE_VAULT, Serve, data_dir_with_model, indexed, path_str, percent_encode, result_paths,
+    run, search, trove, vault_copy,
 };
 use serde_json::{Value, json};
 
@@ -239,15 +239,4 @@ fn sources_are_added_listed_and_removed_through_the_cli_and_the_api() {
     assert_eq!(status, 404, "{error}");
 
     serve.stop();
-}
-
-fn percent_encode(text: &str) -> String {
-    text.bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                char::from(byte).to_string()
-            }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
 }

@@ -14,7 +14,9 @@ export class TroveSettingTab extends PluginSettingTab {
 
     new Setting(this.containerEl)
       .setName("Trove binary")
-      .setDesc("Absolute path to the trove executable. The plugin starts it when it isn't running.")
+      .setDesc(
+        "Absolute path to a trove executable to run instead of the release the plugin downloads. Leave empty to use the release. Applies when the plugin next loads.",
+      )
       .addText((text) =>
         text.setValue(this.plugin.settings.binaryPath).onChange(async (value) => {
           this.plugin.settings.binaryPath = value.trim();

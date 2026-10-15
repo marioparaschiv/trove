@@ -1,5 +1,5 @@
 export interface Settings {
-  /** The `trove` binary the plugin starts the service with. Empty until the user sets it. */
+  /** A `trove` binary to run instead of the pinned release the plugin downloads. Empty uses the release. */
   binaryPath: string;
 }
 

@@ -8,6 +8,7 @@ mod guard;
 mod indexing;
 mod model;
 mod openapi;
+mod related;
 mod runtime;
 mod search;
 mod sources;
@@ -90,6 +91,7 @@ fn router() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(status::status))
         .routes(routes!(events::events))
         .routes(routes!(search::search))
+        .routes(routes!(related::related))
         .routes(routes!(model::prewarm))
         .routes(routes!(model::unload))
         .routes(routes!(sources::list, sources::add, sources::remove))

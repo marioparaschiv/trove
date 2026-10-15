@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeSet, HashSet},
     sync::Mutex,
 };
 
@@ -32,12 +32,6 @@ impl<'a> GraphRerank<'a> {
     }
 }
 
-#[derive(Default)]
-struct NoteRank {
-    rank: f32,
-    best_section: Option<(i64, f32)>,
-}
-
 impl Stage for GraphRerank<'_> {
     fn run(
         &self,
@@ -62,20 +56,7 @@ impl Stage for GraphRerank<'_> {
             .collect();
         let ranks = graph.graph.personalized_pagerank(&seeds);
 
-        let mut notes: BTreeMap<i64, NoteRank> = BTreeMap::new();
-        for (node, &rank) in graph.nodes.iter().zip(&ranks) {
-            match *node {
-                Node::Note(file_id) => notes.entry(file_id).or_default().rank += rank,
-                Node::Section(section) => {
-                    let note = notes.entry(section.file_id).or_default();
-                    note.rank += rank;
-                    if note.best_section.is_none_or(|(_, best)| rank > best) {
-                        note.best_section = Some((section.chunk_id, rank));
-                    }
-                }
-                Node::Tag => {}
-            }
-        }
+        let notes = graph.note_ranks(&ranks);
         let best_note_rank = notes.values().map(|note| note.rank).fold(0.0, f32::max);
         if best_note_rank <= 0.0 {
             return Ok(candidates);

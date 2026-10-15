@@ -17,6 +17,7 @@ pub use collapse::CollapseToNotes;
 pub use fusion::Fusion;
 pub use graph::GraphRerank;
 pub use meaning::Meaning;
+pub(crate) use request::results;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
 pub use words::Words;
 

@@ -90,7 +90,10 @@ pub fn search(
     })
 }
 
-fn results(index: &Index, candidates: &[Candidate]) -> rusqlite::Result<Vec<SearchResult>> {
+pub(crate) fn results(
+    index: &Index,
+    candidates: &[Candidate],
+) -> rusqlite::Result<Vec<SearchResult>> {
     let chunk_ids: Vec<i64> = candidates
         .iter()
         .map(|candidate| candidate.chunk_id)

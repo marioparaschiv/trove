@@ -8,5 +8,6 @@ pub mod http;
 pub mod index;
 pub mod indexer;
 pub mod model_setup;
+pub mod related;
 pub mod search;
 pub mod sync_store;

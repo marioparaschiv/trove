@@ -20,6 +20,7 @@ use ureq::{
         },
     },
 };
+use utoipa::ToSchema;
 
 use crate::{config::Config, data_dir::DataDir};
 
@@ -84,8 +85,9 @@ impl ModelFile {
 }
 
 /// Progress of `setup`, serialised as one JSON line each by `trove setup --json`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[schema(as = SetupEvent)]
 pub enum Event {
     File {
         name: String,
@@ -106,6 +108,7 @@ pub enum Event {
         seconds: f64,
     },
     Done {
+        #[schema(value_type = String)]
         path: PathBuf,
     },
     Error {
@@ -113,8 +116,9 @@ pub enum Event {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = SetupSource)]
 pub enum Source {
     Cache,
     Download,

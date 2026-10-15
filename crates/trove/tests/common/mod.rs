@@ -307,3 +307,15 @@ pub fn read_runtime(data_dir: &TempDir) -> Option<Value> {
 
     Some(serde_json::from_str(&text).unwrap())
 }
+
+/// Encodes `text` for a URL query string.
+pub fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
