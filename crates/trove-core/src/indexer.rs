@@ -15,7 +15,8 @@ use crate::{
 
 pub use chunker::Chunker;
 pub(crate) use chunker::document_title;
-pub use scan::{IndexProblem, IndexReport, index_sources};
+pub use embed::EmbedProgress;
+pub use scan::{IndexMode, IndexProblem, IndexReport, index_sources};
 
 #[derive(Debug, Error)]
 pub enum IndexerError {

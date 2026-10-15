@@ -9,12 +9,21 @@ use crate::{
 /// Chunk texts embedded per call. Small enough that a search waiting for the model isn't held up for long.
 const BATCH: usize = 16;
 
+/// How far an index run is through embedding, reported after each batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbedProgress {
+    pub embedded: u64,
+    pub total: u64,
+}
+
 /// Embeds every chunk text that has no vector yet, without holding the index while the model runs. Returns how many
 /// texts were embedded.
 pub(super) fn embed_missing(
     index: &Mutex<Index>,
     embedder: &Embedder,
+    progress: &mut dyn FnMut(EmbedProgress),
 ) -> Result<u64, IndexerError> {
+    let total = index::lock(index).unembedded_count()?;
     let mut embedded = 0;
     loop {
         let chunks = index::lock(index).unembedded_chunks(BATCH)?;
@@ -43,5 +52,6 @@ pub(super) fn embed_missing(
                 .map(|(chunk, vector)| (chunk.text_hash.as_slice(), vector.as_slice())),
         )?;
         embedded += chunks.len() as u64;
+        progress(EmbedProgress { embedded, total });
     }
 }

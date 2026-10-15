@@ -38,7 +38,11 @@ fn event_stream_ends_with_stopping_when_the_service_goes_idle() {
         .filter_map(|line| line.strip_prefix("data: "))
         .map(|data| serde_json::from_str(data).unwrap())
         .collect();
-    assert_eq!(data, [serde_json::json!({ "type": "stopping" })]);
+    // The startup index run may come before it.
+    assert_eq!(
+        data.last(),
+        Some(&serde_json::json!({ "type": "stopping" }))
+    );
     assert!(serve.child.wait().unwrap().success());
     assert!(!runtime_path(&serve.data_dir).exists());
 }

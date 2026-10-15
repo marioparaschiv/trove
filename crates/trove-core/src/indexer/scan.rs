@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -9,7 +10,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
-use super::{Indexer, IndexerError, NoteFile, embed::embed_missing, frontmatter::properties};
+use super::{
+    Indexer, IndexerError, NoteFile,
+    embed::{EmbedProgress, embed_missing},
+    frontmatter::properties,
+};
 use crate::{
     config::Config,
     embedder::{Embedder, vector_version},
@@ -18,6 +23,19 @@ use crate::{
 };
 
 const NOTE_EXTENSION: &str = "md";
+
+/// Which notes an index run chunks and which chunk texts it embeds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexMode {
+    /// Chunks the notes whose content changed, finding them by modification time first, then by content hash.
+    #[default]
+    Changed,
+    /// Reads and chunks every note, but still embeds only chunk texts without a vector.
+    Full,
+    /// Drops every vector, then reads, chunks and embeds every note.
+    Reembed,
+}
 
 /// What an index run did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -54,16 +72,29 @@ struct Found {
     relative: String,
 }
 
-/// Reads and chunks every note in every source, drops notes that are gone, then embeds the chunk texts that have no
-/// vector. The index is locked one note or one batch at a time, so searches go on meanwhile.
+/// The `files` row of a note as last indexed.
+struct Stored {
+    mtime: i64,
+    hash: Vec<u8>,
+}
+
+/// Chunks the notes `mode` picks in every source, drops notes that are gone and the vectors no chunk uses any more,
+/// then embeds the chunk texts that have no vector. The index is locked one note or one batch at a time, so searches go
+/// on meanwhile.
 pub fn index_sources(
     index: &Mutex<Index>,
     embedder: &Arc<Embedder>,
     config: &Config,
+    mode: IndexMode,
+    progress: &mut dyn FnMut(EmbedProgress),
 ) -> Result<IndexReport, IndexerError> {
     let sources = {
         let mut index = index::lock(index);
         index.ensure_vector_version(&vector_version(&config.model.sha256))?;
+        if mode == IndexMode::Reembed {
+            index.connection().execute("DELETE FROM vectors", [])?;
+        }
+
         index.sources()?
     };
 
@@ -76,9 +107,15 @@ pub fn index_sources(
     };
 
     for source in &sources {
-        index_source(index, &indexer, source, config, &mut report)?;
+        index_source(index, &indexer, source, config, mode, &mut report)?;
     }
-    report.embedded = embed_missing(index, embedder)?;
+
+    // Only once every source is scanned, so a note moved between folders keeps its vectors.
+    index::lock(index).connection().execute(
+        "DELETE FROM vectors WHERE text_hash NOT IN (SELECT text_hash FROM chunks)",
+        [],
+    )?;
+    report.embedded = embed_missing(index, embedder, progress)?;
 
     Ok(report)
 }
@@ -88,6 +125,7 @@ fn index_source(
     indexer: &Indexer,
     source: &Source,
     config: &Config,
+    mode: IndexMode,
     report: &mut IndexReport,
 ) -> Result<(), IndexerError> {
     let root = Path::new(&source.path);
@@ -98,17 +136,40 @@ fn index_source(
         return Ok(());
     }
 
+    let stored = stored_notes(index, source.id)?;
     for note in &found {
-        match read_note(&note.path) {
-            Ok(read) => {
-                if let Some(problem) = &read.properties_problem {
-                    report.problems.push(problem.clone());
-                }
-                write_note(index, indexer, source.id, note, &read)?;
-                report.files += 1;
+        let stored = stored.get(&note.relative);
+        let mtime = match modified(&note.path) {
+            Ok(mtime) => mtime,
+            Err(error) => {
+                report.problems.push(IndexProblem::new(&note.path, &error));
+                continue;
             }
-            Err(error) => report.problems.push(IndexProblem::new(&note.path, &error)),
+        };
+        if mode == IndexMode::Changed && stored.is_some_and(|stored| stored.mtime == mtime) {
+            continue;
         }
+
+        let read = match read_note(&note.path, mtime) {
+            Ok(read) => read,
+            Err(error) => {
+                report.problems.push(IndexProblem::new(&note.path, &error));
+                continue;
+            }
+        };
+        if mode == IndexMode::Changed && stored.is_some_and(|stored| stored.hash == read.hash) {
+            index::lock(index).connection().execute(
+                "UPDATE files SET mtime = ?1 WHERE source_id = ?2 AND path = ?3",
+                (mtime, source.id, &note.relative),
+            )?;
+            continue;
+        }
+
+        if let Some(problem) = &read.properties_problem {
+            report.problems.push(problem.clone());
+        }
+        write_note(index, indexer, source.id, note, &read)?;
+        report.files += 1;
     }
 
     let paths: Vec<&str> = found.iter().map(|note| note.relative.as_str()).collect();
@@ -120,6 +181,29 @@ fn index_source(
     report.removed += removed as u64;
 
     Ok(())
+}
+
+fn stored_notes(
+    index: &Mutex<Index>,
+    source_id: i64,
+) -> Result<HashMap<String, Stored>, IndexerError> {
+    let index = index::lock(index);
+    let mut statement = index
+        .connection()
+        .prepare("SELECT path, mtime, hash FROM files WHERE source_id = ?1")?;
+    let stored = statement
+        .query_map([source_id], |row| {
+            Ok((
+                row.get(0)?,
+                Stored {
+                    mtime: row.get(1)?,
+                    hash: row.get(2)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    Ok(stored)
 }
 
 /// Collects the notes under `folder`, skipping hidden entries (`.obsidian`, `.trash`, as Obsidian does), the store
@@ -192,13 +276,19 @@ enum ReadError {
     Mtime,
 }
 
-fn read_note(path: &Path) -> Result<ReadNote, ReadError> {
-    let mtime = fs::metadata(path)?
+/// The note's modification time in nanoseconds since the Unix epoch.
+fn modified(path: &Path) -> Result<i64, ReadError> {
+    fs::metadata(path)?
         .modified()?
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|since| i64::try_from(since.as_nanos()).ok())
-        .ok_or(ReadError::Mtime)?;
+        .ok_or(ReadError::Mtime)
+}
+
+/// Reads a note whose modification time was `mtime` just before. Taking it first means a write in between leaves an
+/// older time behind, so the next run reads the note again.
+fn read_note(path: &Path, mtime: i64) -> Result<ReadNote, ReadError> {
     let bytes = fs::read(path)?;
     let hash = Sha256::digest(&bytes).to_vec();
     let text = String::from_utf8(bytes).map_err(|_| ReadError::NotUtf8)?;

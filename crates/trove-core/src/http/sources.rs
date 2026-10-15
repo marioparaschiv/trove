@@ -78,6 +78,7 @@ pub(super) async fn add(
 ) -> Result<(StatusCode, Json<Source>), ApiError> {
     let Json(SourcePath { path }) = request?;
     let source = with_index(&state, move |index| index.add_source(&PathBuf::from(path))).await?;
+    state.watcher.watch(&source.path);
 
     Ok((StatusCode::CREATED, Json(source)))
 }
@@ -104,6 +105,7 @@ pub(super) async fn remove(
         index.remove_source(&PathBuf::from(path))
     })
     .await?;
+    state.watcher.unwatch(&source.path);
 
     Ok(Json(source))
 }

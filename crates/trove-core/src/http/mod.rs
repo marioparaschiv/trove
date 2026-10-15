@@ -11,6 +11,7 @@ mod runtime;
 mod search;
 mod sources;
 mod status;
+mod watcher;
 
 use std::{
     io,
@@ -27,6 +28,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use error::ErrorBody;
 pub use events::Event;
+pub use indexing::{IndexRequest, IndexingStatus};
 pub use model::ModelStatus;
 pub use openapi::openapi;
 pub use runtime::{RuntimeError, RuntimeFile};
@@ -38,9 +40,12 @@ use crate::{
     data_dir::DataDir,
     embedder::Embedder,
     index::{Index, IndexError},
+    indexer::IndexMode,
 };
 use activity::Activity;
+use indexing::{Indexing, Job};
 use runtime::ServiceLock;
+use watcher::{Changes, Watcher};
 
 const EVENT_BUFFER: usize = 256;
 
@@ -52,6 +57,8 @@ pub enum ServeError {
     Runtime(#[from] RuntimeError),
     #[error(transparent)]
     Index(#[from] IndexError),
+    #[error("failed to watch the sources")]
+    Watch(#[source] notify::Error),
     #[error("failed to generate the access token")]
     Token(#[source] getrandom::Error),
     #[error("failed to listen on localhost")]
@@ -72,6 +79,8 @@ pub(crate) struct AppState {
     embedder: Arc<Embedder>,
     events: broadcast::Sender<Event>,
     activity: Activity,
+    indexing: Indexing,
+    watcher: Watcher,
     shutdown: CancellationToken,
 }
 
@@ -92,6 +101,9 @@ pub struct Service {
     idle_timeout: Duration,
     listener: TcpListener,
     state: Arc<AppState>,
+    changes: Changes,
+    /// The scan that catches changes made while no service ran.
+    startup_index: Job,
     _lock: ServiceLock,
 }
 
@@ -99,6 +111,10 @@ impl Service {
     pub async fn start(data_dir: &DataDir, config: &Config) -> Result<Self, ServeError> {
         let lock = ServiceLock::try_acquire(data_dir)?.ok_or(ServeError::AlreadyRunning)?;
         let index = Index::open(data_dir)?;
+        let (watcher, changes) = Watcher::new().map_err(ServeError::Watch)?;
+        for source in index.sources()? {
+            watcher.watch(&source.path);
+        }
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .map_err(ServeError::Bind)?;
@@ -120,14 +136,20 @@ impl Service {
             config: config.clone(),
             events: broadcast::channel(EVENT_BUFFER).0,
             activity: Activity::new(),
+            indexing: Indexing::default(),
+            watcher,
             shutdown: CancellationToken::new(),
         });
+        // Queued before clients can connect, so `/status` shows it busy from the start.
+        let startup_index = Job::queue(&state);
 
         Ok(Self {
             data_dir: data_dir.clone(),
             idle_timeout: config.service_idle_timeout,
             listener,
             state,
+            changes,
+            startup_index,
             _lock: lock,
         })
     }
@@ -145,6 +167,12 @@ impl Service {
                 guard::guard,
             ))
             .with_state(Arc::clone(&self.state));
+
+        tokio::spawn(watcher::index_changes(
+            Arc::clone(&self.state),
+            self.changes,
+        ));
+        tokio::spawn(self.startup_index.run(IndexMode::Changed));
 
         let shutdown = self.state.shutdown.clone();
         let server = tokio::spawn(
