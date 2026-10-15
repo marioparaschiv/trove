@@ -10,7 +10,6 @@ mod unload;
 use clap::Subcommand;
 use trove_core::{config::Config, data_dir::DataDir};
 
-#[expect(dead_code, reason = "no command reads the context yet")]
 pub struct Context {
     pub data_dir: DataDir,
     pub config: Config,
