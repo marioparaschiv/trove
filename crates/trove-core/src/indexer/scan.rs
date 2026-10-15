@@ -14,6 +14,7 @@ use super::{
     Indexer, IndexerError, NoteFile,
     embed::{EmbedProgress, embed_missing},
     frontmatter::properties,
+    neighbours::update_graph_edges,
     store::{chunks_for, import_vectors, read_vector_file, write_vector_files},
 };
 use crate::{
@@ -140,6 +141,7 @@ pub fn index_sources(
         &vector_version,
         &mut report,
     )?;
+    update_graph_edges(index)?;
 
     Ok(report)
 }

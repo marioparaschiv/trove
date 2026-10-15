@@ -40,7 +40,7 @@ Zero model calls on rebuild: `GET /status` `indexing.embedded` stays 0 and `mode
 
 Determinism. The file bytes are a pure function of the note, its chunks and their vectors. llama.cpp vectors depend slightly on batch composition (measured: the same note embedded alone and among all chunks differs in the low fp16 bits) and on the CPU variant or backend. So the same machine re-embedding the same vault gives identical files (tested with `--reembed`), but two devices that each embed a note independently can write different bytes. A device that finds a matching file imports its vectors and rewrites nothing, so only truly simultaneous embeds diverge, and their conflict copies are deleted.
 
-Tests that index the fixture vault now use `vault_copy()` (`hybrid_search.rs`, `meaning_search.rs`): indexing writes the store into the vault, and a shared store would let tests import each other's vectors.
+Tests that index the fixture vault now use `vault_copy()` (`hybrid_search.rs`, `meaning_search.rs`, `graph_search.rs`): indexing writes the store into the vault, and a shared store would let tests import each other's vectors.
 
 Not done, deviations.
 - The store folder is not watched: a vector file arriving after its note was already embedded locally is not imported (the local vectors are valid; the note's next change rewrites the file). The watcher still ignores the store folder.

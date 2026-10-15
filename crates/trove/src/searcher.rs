@@ -17,6 +17,9 @@ pub struct StageSwitches {
     /// Leave out search by words
     #[arg(long)]
     no_words: bool,
+    /// Leave out the graph rerank
+    #[arg(long)]
+    no_graph: bool,
 }
 
 impl StageSwitches {
@@ -24,6 +27,7 @@ impl StageSwitches {
         [
             (self.no_meaning, Signal::Meaning),
             (self.no_words, Signal::Words),
+            (self.no_graph, Signal::Graph),
         ]
         .into_iter()
         .filter_map(|(off, signal)| off.then_some(signal))

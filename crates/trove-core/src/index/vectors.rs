@@ -12,6 +12,12 @@ pub(crate) struct UnembeddedChunk {
     pub(crate) text: String,
 }
 
+pub(crate) struct SectionVector {
+    pub(crate) file_id: i64,
+    pub(crate) text_hash: Vec<u8>,
+    pub(crate) vector: Vec<f32>,
+}
+
 #[derive(Debug, Error)]
 #[error("a stored vector has {found} bytes, but the query has {expected} dimensions")]
 struct WrongLength {
@@ -127,16 +133,37 @@ impl Index {
                     ));
                 }
 
-                let score = vector
-                    .chunks_exact(2)
+                let score = values(vector)
                     .zip(query)
-                    .map(|(bytes, &value)| {
-                        f16::from_le_bytes([bytes[0], bytes[1]]).to_f32() * value
-                    })
+                    .map(|(stored, &value)| stored * value)
                     .sum();
 
                 Ok((row.get(0)?, score))
             })?
             .collect()
     }
+
+    /// Every section with a vector: its note, text hash and vector.
+    pub(crate) fn section_vectors(&self) -> rusqlite::Result<Vec<SectionVector>> {
+        let mut statement = self.conn.prepare(
+            "SELECT DISTINCT c.file_id, c.text_hash, v.vector FROM chunks c JOIN vectors v USING (text_hash)",
+        )?;
+
+        statement
+            .query_map([], |row| {
+                Ok(SectionVector {
+                    file_id: row.get(0)?,
+                    text_hash: row.get(1)?,
+                    vector: values(row.get_ref(2)?.as_blob()?).collect(),
+                })
+            })?
+            .collect()
+    }
+}
+
+/// A stored vector's values.
+fn values(vector: &[u8]) -> impl Iterator<Item = f32> {
+    vector
+        .chunks_exact(2)
+        .map(|bytes| f16::from_le_bytes([bytes[0], bytes[1]]).to_f32())
 }
