@@ -5,6 +5,7 @@ use std::{fs, path::Path};
 use common::{Serve, copy_of, indexed, path_str, percent_encode, run};
 use serde_json::json;
 use tempfile::TempDir;
+use trove_core::sync_store::{SuggestionState, SyncStore, note_pair};
 
 /// Notes on coffee, a trip, and three topics unrelated to either.
 const RELATED_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
@@ -93,17 +94,23 @@ fn similar_unlinked_notes_are_suggested_until_linked_or_decided() {
     );
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, LISBON));
 
-    decide(&serve, vault.path(), POUR_OVER, ESPRESSO, "accepted");
-    assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
-    // The latest decision wins.
-    decide(&serve, vault.path(), ESPRESSO, POUR_OVER, "pending");
-    assert!(is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
-
-    // What accepting in Obsidian does: a wikilink at the end of the note.
+    // What accepting in Obsidian does: a wikilink at the end of the note, then the decision.
     let espresso = vault.path().join(ESPRESSO);
     let text = fs::read_to_string(&espresso).unwrap();
     fs::write(&espresso, format!("{text}\n[[Pour over]]\n")).unwrap();
     index(&serve);
+    assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
+    decide(&serve, vault.path(), POUR_OVER, ESPRESSO, "accepted");
+
+    serve.stop();
+}
+
+#[test]
+fn an_accepted_suggestion_is_not_suggested_again() {
+    let vault = copy_of(Path::new(RELATED_VAULT));
+    let serve = start(indexed(vault.path()));
+
+    decide(&serve, vault.path(), POUR_OVER, ESPRESSO, "accepted");
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
 
     serve.stop();
@@ -130,6 +137,15 @@ fn a_dismissed_suggestion_stays_dismissed_after_the_index_is_rebuilt() {
     rebuilt.stop();
 }
 
+/// The merged decision about the pair, as every device reads it from the vault's decisions files.
+fn merged_state(vault: &Path) -> Option<SuggestionState> {
+    SyncStore::new(vault, ".trove")
+        .suggestion_states()
+        .unwrap()
+        .get(&note_pair(ESPRESSO, POUR_OVER))
+        .copied()
+}
+
 #[test]
 fn decisions_from_two_data_folders_merge_and_the_latest_wins() {
     let vault = copy_of(Path::new(RELATED_VAULT));
@@ -138,12 +154,13 @@ fn decisions_from_two_data_folders_merge_and_the_latest_wins() {
 
     decide(&first, vault.path(), ESPRESSO, POUR_OVER, "dismissed");
     assert!(!is_suggested(&second, vault.path(), ESPRESSO, POUR_OVER));
+    assert_eq!(merged_state(vault.path()), Some(SuggestionState::Dismissed));
 
-    decide(&second, vault.path(), ESPRESSO, POUR_OVER, "pending");
-    assert!(is_suggested(&first, vault.path(), ESPRESSO, POUR_OVER));
-    assert!(is_suggested(&second, vault.path(), ESPRESSO, POUR_OVER));
+    decide(&second, vault.path(), POUR_OVER, ESPRESSO, "accepted");
+    assert_eq!(merged_state(vault.path()), Some(SuggestionState::Accepted));
 
-    decide(&first, vault.path(), POUR_OVER, ESPRESSO, "dismissed");
+    decide(&first, vault.path(), ESPRESSO, POUR_OVER, "dismissed");
+    assert_eq!(merged_state(vault.path()), Some(SuggestionState::Dismissed));
     assert!(!is_suggested(&first, vault.path(), ESPRESSO, POUR_OVER));
     assert!(!is_suggested(&second, vault.path(), ESPRESSO, POUR_OVER));
 

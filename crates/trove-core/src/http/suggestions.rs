@@ -62,7 +62,7 @@ pub(super) async fn suggestions(
     Ok(Json(response))
 }
 
-/// Accepts or dismisses a suggested link (or sets it back to pending). The decision is kept in the source's sync
+/// Accepts or dismisses a suggested link. The decision is kept in the source's sync
 /// store, so it holds on every device that syncs the vault.
 #[utoipa::path(
     post,

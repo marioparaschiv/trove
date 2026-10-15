@@ -137,11 +137,7 @@ pub fn suggestions(
         .filter(|((a, b), _)| !links.contains(&(*a, *b)) && !links.contains(&(*b, *a)))
         .filter_map(|((a, b), similarity)| {
             let [note, target] = sorted_notes(notes.get(&a)?, notes.get(&b)?);
-            let decided = states.get(&note_pair(&note.path, &target.path));
-            if matches!(
-                decided,
-                Some(SuggestionState::Accepted | SuggestionState::Dismissed)
-            ) {
+            if states.contains_key(&note_pair(&note.path, &target.path)) {
                 return None;
             }
 

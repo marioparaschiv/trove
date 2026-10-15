@@ -23,8 +23,6 @@ const EXTENSION: &str = "jsonl";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestionState {
-    /// Undecided: the pair is suggested again while it stays similar and unlinked.
-    Pending,
     /// Linked by the user.
     Accepted,
     /// Never to be suggested again.
