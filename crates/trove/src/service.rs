@@ -28,8 +28,11 @@ impl Service {
             .into();
         let service = Self { runtime, agent };
 
-        // A runtime file left by a service that crashed points at a port nobody listens on.
+        // A runtime file left by a service that crashed points at a port nobody listens on, or that another program
+        // has taken since.
         match service.request("/status") {
+            // Trove's `/status` refuses no request with its own token, so a refusal is another program's.
+            Ok(response) if response.status().is_client_error() => Ok(None),
             Ok(_) => Ok(Some(service)),
             Err(ureq::Error::Io(error)) if error.kind() == io::ErrorKind::ConnectionRefused => {
                 Ok(None)
