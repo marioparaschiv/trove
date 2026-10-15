@@ -1,25 +1,32 @@
 //! Categories: hierarchical Leiden communities of the notes over the combined graph, each with a start-here note and a
-//! name made of its most distinctive terms.
+//! name made of its most distinctive terms. The user's category pins, kept in each source's sync store, override
+//! them.
 
 mod names;
+mod pins;
+mod tree;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    path::Path,
     sync::Mutex,
 };
 
 use network_partitions::{errors::CoreError, leiden, network::prelude::LabeledNetworkBuilder};
 use rand::{SeedableRng, rngs::Xoshiro256PlusPlus};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
     graph::{ExcludedFolder, Graph, Node, VaultGraph},
-    index::{self, Index},
+    index::{self, Index, IndexError},
+    sync_store::{CategoryPin, Decision, StoreError, SyncStore},
 };
 use names::NoteTerms;
+use pins::Pins;
+use tree::{Community, Place, Tree};
 
 /// A community of at least this many notes is split into subcategories (GraphRAG's default). The eval on a real vault
 /// sets the final value.
@@ -67,40 +74,161 @@ pub struct CategoryNote {
     pub title: String,
 }
 
+/// Manual category edits in one source, kept in its sync store so they hold on every device that syncs it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryPins {
+    /// The source folder, as registered.
+    pub source: String,
+    /// In order: a pin overrides earlier ones about the same category or note.
+    pub pins: Vec<CategoryPin>,
+}
+
 #[derive(Debug, Error)]
 pub enum CategoriesError {
+    #[error("{0} is not a source")]
+    UnknownSource(String),
+    #[error("a category name can't be empty")]
+    EmptyName,
     #[error(transparent)]
-    Index(#[from] rusqlite::Error),
+    Index(#[from] IndexError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
     #[error("community detection failed: {0:?}")]
     Leiden(CoreError),
 }
 
-struct Community {
-    parent: Option<usize>,
-    /// Its notes, subcategories included.
-    members: BTreeSet<i64>,
+impl From<rusqlite::Error> for CategoriesError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Index(error.into())
+    }
 }
 
-/// Groups the indexed notes into a hierarchy of categories.
+/// A run's communities by `(level, cluster id)`, and the deepest community of each note.
+type Hierarchy = (BTreeMap<(u32, usize), Community>, BTreeMap<i64, usize>);
+
+/// Groups the indexed notes into a hierarchy of categories, following the category pins in each source's store.
 pub fn categories(
     index: &Mutex<Index>,
+    store_folder: &str,
     request: &CategoriesRequest,
 ) -> Result<CategoriesResponse, CategoriesError> {
-    let (graph, notes, terms) = {
+    let (graph, notes, terms, sources) = {
         let index = index::lock(index);
         let conn = index.connection();
         (
             VaultGraph::load_without(conn, request.exclude_folder.as_ref())?,
             notes(conn)?,
             NoteTerms::load(conn)?,
+            index.sources()?,
         )
     };
 
+    let file_ids: HashMap<(&str, &str), i64> = notes
+        .iter()
+        .filter(|(_, note)| {
+            request
+                .exclude_folder
+                .as_ref()
+                .is_none_or(|folder| !folder.contains(&note.path))
+        })
+        .map(|(&file_id, note)| ((note.source.as_str(), note.path.as_str()), file_id))
+        .collect();
+    let mut source_pins = Vec::new();
+    for source in sources {
+        let store = SyncStore::new(Path::new(&source.path), store_folder);
+        for pin in store.category_pins()? {
+            source_pins.push((source.path.clone(), pin));
+        }
+    }
+    let pins = Pins::resolve(source_pins, |source, path| {
+        file_ids.get(&(source, path)).copied()
+    });
+
     let edges = note_edges(&graph);
+    let (communities, deepest) = communities(&edges)?;
+    let Tree {
+        places,
+        direct,
+        members,
+    } = tree::tree(&communities, &deepest, &pins);
+
+    let ids: HashMap<&Place, usize> = places
+        .iter()
+        .enumerate()
+        .map(|(id, (place, _))| (place, id))
+        .collect();
+    let names = names(&places, &members, &terms);
+    let categories = places
+        .iter()
+        .map(|(place, parent)| {
+            let mut notes_here: Vec<CategoryNote> = direct
+                .get(place)
+                .into_iter()
+                .flatten()
+                .map(|file_id| notes[file_id].clone())
+                .collect();
+            notes_here.sort();
+            Category {
+                id: ids[place],
+                parent: parent.as_ref().map(|parent| ids[parent]),
+                name: names[place].clone(),
+                start_here: notes[&most_central(&members[place], &edges)].clone(),
+                notes: notes_here,
+            }
+        })
+        .collect();
+
+    Ok(CategoriesResponse { categories })
+}
+
+/// Records category pins in the source's sync store, as made on this device now.
+pub fn pin(
+    index: &Mutex<Index>,
+    store_folder: &str,
+    request: CategoryPins,
+) -> Result<(), CategoriesError> {
+    let names_empty = request.pins.iter().any(|pin| match pin {
+        CategoryPin::Category { name, replaces, .. } => {
+            name.trim().is_empty() || replaces.iter().any(|name| name.trim().is_empty())
+        }
+        CategoryPin::Parent { category, parent } => {
+            category.trim().is_empty() || parent.as_ref().is_some_and(|name| name.trim().is_empty())
+        }
+        CategoryPin::Note { category, .. } => category.trim().is_empty(),
+    });
+    if names_empty {
+        return Err(CategoriesError::EmptyName);
+    }
+
+    // Held while writing, so two requests at once can't both rewrite this device's file from the same contents.
+    let index = index::lock(index);
+    let registered: Option<i64> = index
+        .connection()
+        .query_row(
+            "SELECT id FROM sources WHERE path = ?1",
+            [&request.source],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if registered.is_none() {
+        return Err(CategoriesError::UnknownSource(request.source));
+    }
+
+    SyncStore::new(Path::new(&request.source), store_folder).record_decisions(
+        &index.device_id()?,
+        request
+            .pins
+            .into_iter()
+            .map(|pin| Decision::CategoryPin { pin }),
+    )?;
+
+    Ok(())
+}
+
+fn communities(edges: &BTreeMap<(i64, i64), f64>) -> Result<Hierarchy, CategoriesError> {
     if edges.is_empty() {
-        return Ok(CategoriesResponse {
-            categories: Vec::new(),
-        });
+        return Ok(Hierarchy::default());
     }
 
     let network = LabeledNetworkBuilder::new()
@@ -137,32 +265,12 @@ pub fn categories(
             .or_insert((cluster.level, cluster.cluster));
         *place = (*place).max((cluster.level, cluster.cluster));
     }
-
-    let mut direct: HashMap<usize, Vec<CategoryNote>> = HashMap::new();
-    for (file_id, (_, cluster)) in deepest {
-        direct
-            .entry(cluster)
-            .or_default()
-            .push(notes[&file_id].clone());
-    }
-
-    let names = names_by_cluster(&communities, &terms);
-    let categories = communities
-        .iter()
-        .map(|(&(_, id), community)| {
-            let mut members = direct.remove(&id).unwrap_or_default();
-            members.sort();
-            Category {
-                id,
-                parent: community.parent,
-                name: names[&id].clone(),
-                start_here: notes[&most_central(&community.members, &edges)].clone(),
-                notes: members,
-            }
-        })
+    let deepest = deepest
+        .into_iter()
+        .map(|(file_id, (_, cluster))| (file_id, cluster))
         .collect();
 
-    Ok(CategoriesResponse { categories })
+    Ok((communities, deepest))
 }
 
 fn notes(conn: &Connection) -> rusqlite::Result<HashMap<i64, CategoryNote>> {
@@ -253,25 +361,30 @@ fn most_central(members: &BTreeSet<i64>, edges: &BTreeMap<(i64, i64), f64>) -> i
 }
 
 /// Names each community against its siblings: the top-level ones against each other, and subcategories against the
-/// other subcategories of their parent.
-fn names_by_cluster(
-    communities: &BTreeMap<(u32, usize), Community>,
+/// other subcategories of their parent. A pinned category keeps its pinned name.
+fn names<'a>(
+    places: &'a [(Place, Option<Place>)],
+    members: &BTreeMap<Place, BTreeSet<i64>>,
     terms: &NoteTerms,
-) -> HashMap<usize, String> {
-    let mut siblings: BTreeMap<Option<usize>, Vec<usize>> = BTreeMap::new();
-    for (&(_, id), community) in communities {
-        siblings.entry(community.parent).or_default().push(id);
+) -> HashMap<&'a Place, String> {
+    let mut siblings: BTreeMap<Option<&Place>, Vec<&Place>> = BTreeMap::new();
+    for (place, parent) in places {
+        siblings.entry(parent.as_ref()).or_default().push(place);
     }
-    let members: HashMap<usize, &BTreeSet<i64>> = communities
-        .iter()
-        .map(|(&(_, id), community)| (id, &community.members))
-        .collect();
 
     let mut names = HashMap::new();
-    for ids in siblings.values() {
-        let counts: Vec<BTreeMap<&str, u32>> =
-            ids.iter().map(|id| terms.counts(members[id])).collect();
-        names.extend(ids.iter().copied().zip(names::name(&counts)));
+    for group in siblings.values() {
+        let counts: Vec<BTreeMap<&str, u32>> = group
+            .iter()
+            .map(|place| terms.counts(&members[*place]))
+            .collect();
+        for (&place, generated) in group.iter().zip(names::name(&counts)) {
+            let name = match place {
+                Place::Pinned(name) => name.clone(),
+                Place::Community(_) => generated,
+            };
+            names.insert(place, name);
+        }
     }
 
     names

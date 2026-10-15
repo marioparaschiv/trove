@@ -1,10 +1,10 @@
-import { type App, Modal, Notice, type TFile } from "obsidian";
+import { type App, Modal, Notice } from "obsidian";
+import type { CategoryEdits } from "./category-edits.ts";
 import {
   CATEGORY_NOTE_BODY,
   type CategoryChange,
   describeChange,
   linkTarget,
-  linkTo,
   type NoteState,
   planCategories,
 } from "./category-notes.ts";
@@ -17,11 +17,18 @@ export class CategoryCommands {
   private readonly plugin: TrovePlugin;
   private readonly binary: Promise<string>;
   private readonly vaultPath: string;
+  private readonly edits: CategoryEdits;
 
-  constructor(plugin: TrovePlugin, binary: Promise<string>, vaultPath: string) {
+  constructor(
+    plugin: TrovePlugin,
+    binary: Promise<string>,
+    vaultPath: string,
+    edits: CategoryEdits,
+  ) {
     this.plugin = plugin;
     this.binary = binary;
     this.vaultPath = vaultPath;
+    this.edits = edits;
   }
 
   register(): void {
@@ -48,7 +55,7 @@ export class CategoryCommands {
   private async apply(): Promise<void> {
     try {
       const changes = await this.plan();
-      await applyChanges(this.plugin.app, changes, this.plugin.settings.categoryFolder);
+      await applyChanges(this.plugin.app, this.edits, changes, this.plugin.settings.categoryFolder);
       new Notice(
         changes.length === 0
           ? "Trove: categories are up to date"
@@ -113,7 +120,12 @@ class CategoryPreview extends Modal {
   }
 }
 
-async function applyChanges(app: App, changes: CategoryChange[], folder: string): Promise<void> {
+async function applyChanges(
+  app: App,
+  edits: CategoryEdits,
+  changes: CategoryChange[],
+  folder: string,
+): Promise<void> {
   if (
     changes.some((change) => change.kind === "create") &&
     app.vault.getFolderByPath(folder) === null
@@ -125,7 +137,7 @@ async function applyChanges(app: App, changes: CategoryChange[], folder: string)
     if (change.kind === "create") {
       const file = await app.vault.create(change.path, CATEGORY_NOTE_BODY);
       if (change.parent !== undefined) {
-        await setLink(app, file, "parent", change.parent);
+        await edits.setLink(file, "parent", change.parent);
       }
 
       continue;
@@ -136,14 +148,8 @@ async function applyChanges(app: App, changes: CategoryChange[], folder: string)
       throw new Error(`${change.path} is no longer in the vault`);
     }
 
-    await setLink(app, file, change.kind === "set-parent" ? "parent" : "category", change.to);
+    await edits.setLink(file, change.kind === "set-parent" ? "parent" : "category", change.to);
   }
-}
-
-function setLink(app: App, file: TFile, property: string, target: string): Promise<void> {
-  return app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-    frontmatter[property] = linkTo(target);
-  });
 }
 
 /** The note's `category` and `parent` as the paths their links resolve to; `undefined` when there is no such note. */

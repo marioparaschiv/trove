@@ -20,6 +20,7 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
         Some(service) => service.get("/categories")?,
         None => categories::categories(
             &Mutex::new(Index::open(&ctx.data_dir)?),
+            &ctx.config.store_folder,
             &CategoriesRequest::default(),
         )?,
     };
