@@ -27,7 +27,8 @@ struct WrongLength {
 
 impl Index {
     /// Drops every vector when they were made under another `vector_version`, so vectors that don't compare never mix.
-    pub(crate) fn ensure_vector_version(&mut self, version: &str) -> rusqlite::Result<()> {
+    /// Returns whether it did.
+    pub(crate) fn ensure_vector_version(&mut self, version: &str) -> rusqlite::Result<bool> {
         let tx = self.conn.transaction()?;
         let stored: Option<String> = tx
             .query_row(
@@ -37,15 +38,17 @@ impl Index {
             )
             .optional()?;
 
-        if stored.as_deref() != Some(version) {
+        let changed = stored.as_deref() != Some(version);
+        if changed {
             tx.execute("DELETE FROM vectors", [])?;
             tx.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('vector_version', ?1)",
                 [version],
             )?;
         }
+        tx.commit()?;
 
-        tx.commit()
+        Ok(changed)
     }
 
     /// How many distinct chunk texts have no vector.

@@ -93,14 +93,19 @@ pub fn index_sources(
     progress: &mut dyn FnMut(EmbedProgress),
 ) -> Result<IndexReport, IndexerError> {
     let vector_version = vector_version(&config.model.sha256);
-    let sources = {
+    let (sources, mode) = {
         let mut index = index::lock(index);
-        index.ensure_vector_version(&vector_version)?;
+        // Another version may chunk differently, so every note is chunked again, not only the changed ones.
+        let mode = if index.ensure_vector_version(&vector_version)? && mode == IndexMode::Changed {
+            IndexMode::Full
+        } else {
+            mode
+        };
         if mode == IndexMode::Reembed {
             index.connection().execute("DELETE FROM vectors", [])?;
         }
 
-        index.sources()?
+        (index.sources()?, mode)
     };
 
     let indexer = Indexer::standard(Arc::clone(embedder));
