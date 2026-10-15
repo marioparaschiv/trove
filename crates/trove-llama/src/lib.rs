@@ -54,6 +54,15 @@ pub enum LlamaError {
     MissingEmbedding(usize),
 }
 
+/// The devices llama.cpp may run a model on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Devices {
+    /// llama.cpp's own choice: every GPU it found (Metal on macOS), else the CPU.
+    Default,
+    /// The CPU only, even when a GPU is present.
+    Cpu,
+}
+
 /// A text embedding model on llama.cpp: mean-pooled, L2-normalised vectors. Freed on drop.
 pub struct EmbeddingModel {
     model: NonNull<llama_model>,
@@ -69,8 +78,9 @@ pub struct EmbeddingModel {
 unsafe impl Send for EmbeddingModel {}
 
 impl EmbeddingModel {
-    /// Loads the GGUF model at `path`. Every input must fit `max_tokens`, which sizes the context, batch and micro-batch.
-    pub fn load(path: &Path, max_tokens: u32) -> Result<Self, LlamaError> {
+    /// Loads the GGUF model at `path` on `devices`. Every input must fit `max_tokens`, which sizes the context, batch
+    /// and micro-batch.
+    pub fn load(path: &Path, max_tokens: u32, devices: Devices) -> Result<Self, LlamaError> {
         init_backend()?;
 
         let c_path = path
@@ -78,11 +88,18 @@ impl EmbeddingModel {
             .and_then(|path| CString::new(path).ok())
             .ok_or_else(|| LlamaError::InvalidPath(path.to_path_buf()))?;
 
-        // SAFETY: `c_path` is a valid NUL-terminated string and the params come from llama.cpp's defaults.
-        let model = NonNull::new(unsafe {
-            llama_model_load_from_file(c_path.as_ptr(), llama_model_default_params())
-        })
-        .ok_or_else(|| LlamaError::LoadModel(path.to_path_buf()))?;
+        // SAFETY: plain value struct from llama.cpp's defaults.
+        let mut model_params = unsafe { llama_model_default_params() };
+        // An empty device list leaves llama.cpp no GPU to pick. It copies the list while loading.
+        let mut no_devices: [ggml_backend_dev_t; 1] = [std::ptr::null_mut()];
+        if devices == Devices::Cpu {
+            model_params.devices = no_devices.as_mut_ptr();
+        }
+
+        // SAFETY: `c_path` is a valid NUL-terminated string and `no_devices` outlives the call.
+        let model =
+            NonNull::new(unsafe { llama_model_load_from_file(c_path.as_ptr(), model_params) })
+                .ok_or_else(|| LlamaError::LoadModel(path.to_path_buf()))?;
 
         let threads =
             thread::available_parallelism().map_or(1, |count| count.get().min(MAX_THREADS)) as i32;
@@ -253,6 +270,23 @@ fn normalised(vector: &[f32]) -> Vec<f32> {
         .sqrt();
     let scale = if norm > 0.0 { (1.0 / norm) as f32 } else { 0.0 };
     vector.iter().map(|&value| value * scale).collect()
+}
+
+/// Whether llama.cpp found a GPU, which `Devices::Default` then runs models on.
+pub fn has_gpu() -> Result<bool, LlamaError> {
+    init_backend()?;
+
+    // SAFETY: the backends are initialised and every index below the count names a registered device.
+    let has_gpu = unsafe {
+        (0..ggml_backend_dev_count()).any(|index| {
+            matches!(
+                ggml_backend_dev_type(ggml_backend_dev_get(index)),
+                GGML_BACKEND_DEVICE_TYPE_GPU | GGML_BACKEND_DEVICE_TYPE_IGPU
+            )
+        })
+    };
+
+    Ok(has_gpu)
 }
 
 /// llama.cpp's process-wide setup, run once.

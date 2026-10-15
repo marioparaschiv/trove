@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use trove_llama::{EmbeddingModel, LlamaError};
 
-pub use trove_llama::LLAMA_CPP_TAG;
+pub use trove_llama::{Devices, LLAMA_CPP_TAG, has_gpu};
 
 use crate::indexer::Chunker;
 
@@ -82,6 +82,7 @@ pub struct Embedder {
 
 struct Shared {
     model_path: PathBuf,
+    devices: Devices,
     idle_timeout: Duration,
     state: Mutex<State>,
     state_changed: Condvar,
@@ -97,9 +98,14 @@ struct State {
 
 impl Embedder {
     pub fn new(model_path: PathBuf, idle_timeout: Duration) -> Self {
+        Self::on_devices(model_path, idle_timeout, Devices::Default)
+    }
+
+    pub fn on_devices(model_path: PathBuf, idle_timeout: Duration, devices: Devices) -> Self {
         Self {
             shared: Arc::new(Shared {
                 model_path,
+                devices,
                 idle_timeout,
                 state: Mutex::new(State {
                     model: None,
@@ -172,7 +178,11 @@ impl Shared {
             return Ok(state);
         }
 
-        state.model = Some(EmbeddingModel::load(&self.model_path, CONTEXT_TOKENS)?);
+        state.model = Some(EmbeddingModel::load(
+            &self.model_path,
+            CONTEXT_TOKENS,
+            self.devices,
+        )?);
         state.generation += 1;
         let generation = state.generation;
         let shared = Arc::clone(self);
