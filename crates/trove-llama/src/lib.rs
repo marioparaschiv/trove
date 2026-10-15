@@ -169,7 +169,23 @@ impl EmbeddingModel {
         Ok(vectors)
     }
 
+    /// How many tokens `text` takes, special tokens included, before any cut to the context.
+    pub fn count_tokens(&self, text: &str) -> Result<usize, LlamaError> {
+        Ok(self.all_tokens(0, text)?.len())
+    }
+
     fn tokenize(&self, index: usize, text: &str) -> Result<Vec<llama_token>, LlamaError> {
+        let mut tokens = self.all_tokens(index, text)?;
+        if tokens.len() > self.max_tokens {
+            tokens.truncate(self.max_tokens - 1);
+            // SAFETY: `vocab` belongs to the live model.
+            tokens.push(unsafe { llama_vocab_eos(self.vocab) });
+        }
+
+        Ok(tokens)
+    }
+
+    fn all_tokens(&self, index: usize, text: &str) -> Result<Vec<llama_token>, LlamaError> {
         let length = i32::try_from(text.len()).map_err(|_| LlamaError::InputTooLong(index))?;
         let mut tokens: Vec<llama_token> = vec![0; text.len() + 2];
         let mut count = self.tokenize_into(text, length, &mut tokens);
@@ -180,11 +196,6 @@ impl EmbeddingModel {
 
         let count = usize::try_from(count).map_err(|_| LlamaError::InputTooLong(index))?;
         tokens.truncate(count);
-        if tokens.len() > self.max_tokens {
-            tokens.truncate(self.max_tokens - 1);
-            // SAFETY: `vocab` belongs to the live model.
-            tokens.push(unsafe { llama_vocab_eos(self.vocab) });
-        }
 
         Ok(tokens)
     }
