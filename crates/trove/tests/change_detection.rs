@@ -188,3 +188,23 @@ fn index_modes_choose_what_is_read_and_embedded() {
         json!({ "results": [] })
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn notes_in_a_folder_that_cannot_be_listed_are_kept() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
+    let (notes, chunks) = index_size(data_dir.path());
+    let folder = vault.path().join("Travel");
+
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+    let output = run(data_dir.path(), &["index"]);
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(output, "indexed 0 notes (0 removed), embedded 0 chunks\n");
+    assert_eq!(index_size(data_dir.path()), (notes, chunks));
+    let response = common::search(data_dir.path(), "a bamboo grove and a monkey park");
+    assert_eq!(result_paths(&response)[0], EDITED_NOTE, "{response}");
+}

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -169,12 +169,13 @@ fn index_source(
     report: &mut IndexReport,
 ) -> Result<Vec<i64>, IndexerError> {
     let root = Path::new(&source.path);
-    let mut found = Vec::new();
+    let mut listing = Listing::default();
     // A source that can't be read now (an unplugged drive) keeps what was indexed from it.
-    if let Err(error) = find_notes(root, "", &config.store_folder, &mut found, report) {
+    if let Err(error) = find_notes(root, "", &config.store_folder, &mut listing, report) {
         report.problems.push(IndexProblem::new(root, &error));
         return Ok(Vec::new());
     }
+    let found = listing.found;
 
     let store = SyncStore::new(root, &config.store_folder);
     for error in store.remove_conflict_copies() {
@@ -230,18 +231,22 @@ fn index_source(
         report.files += 1;
     }
 
-    let paths: Vec<&str> = found.iter().map(|note| note.relative.as_str()).collect();
-    let paths = serde_json::to_string(&paths).expect("a list of strings serialises");
-    let removed: Vec<String> = {
-        let index = index::lock(index);
-        let mut statement = index.connection().prepare(
-            "DELETE FROM files WHERE source_id = ?1 AND path NOT IN (SELECT value FROM json_each(?2))
-             RETURNING path",
+    let found: HashSet<&str> = found.iter().map(|note| note.relative.as_str()).collect();
+    // A note in a folder that couldn't be listed is not gone, so it keeps its index rows and vector file.
+    let removed: Vec<&str> = stored
+        .keys()
+        .map(String::as_str)
+        .filter(|path| {
+            !found.contains(path) && !listing.unlisted.iter().any(|folder| is_in(path, folder))
+        })
+        .collect();
+    {
+        let removed = serde_json::to_string(&removed).expect("a list of strings serialises");
+        index::lock(index).connection().execute(
+            "DELETE FROM files WHERE source_id = ?1 AND path IN (SELECT value FROM json_each(?2))",
+            (source.id, removed),
         )?;
-        statement
-            .query_map((source.id, paths), |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?
-    };
+    }
     for relative in &removed {
         if let Err(error) = store.remove(relative) {
             report
@@ -252,6 +257,22 @@ fn index_source(
     report.removed += removed.len() as u64;
 
     Ok(written)
+}
+
+/// Whether the note at `path` is at or under `folder`, the empty folder being the source's root.
+fn is_in(path: &str, folder: &str) -> bool {
+    folder.is_empty()
+        || path
+            .strip_prefix(folder)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// What listing a source found.
+#[derive(Default)]
+struct Listing {
+    found: Vec<Found>,
+    /// Folders and entries that could not be listed in full, relative to the source.
+    unlisted: Vec<String>,
 }
 
 fn stored_notes(
@@ -278,15 +299,25 @@ fn stored_notes(
 }
 
 /// Collects the notes under `folder`, skipping hidden entries (`.obsidian`, `.trash`, as Obsidian does), the store
-/// folder and symbolic links. Fails only when `folder` itself can't be listed; a subfolder that can't be is reported.
+/// folder and symbolic links. Fails only when `folder` itself can't be listed; a subfolder or an entry that can't be is
+/// reported and recorded as unlisted.
 fn find_notes(
     folder: &Path,
     relative: &str,
     store_folder: &str,
-    found: &mut Vec<Found>,
+    listing: &mut Listing,
     report: &mut IndexReport,
 ) -> io::Result<()> {
-    let mut entries = fs::read_dir(folder)?.collect::<io::Result<Vec<_>>>()?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(folder)? {
+        match entry {
+            Ok(entry) => entries.push(entry),
+            Err(error) => {
+                report.problems.push(IndexProblem::new(folder, &error));
+                listing.unlisted.push(relative.to_owned());
+            }
+        }
+    }
     entries.sort_by_key(fs::DirEntry::file_name);
 
     for entry in entries {
@@ -307,18 +338,26 @@ fn find_notes(
         } else {
             format!("{relative}/{name}")
         };
-        let file_type = entry.file_type()?;
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                report.problems.push(IndexProblem::new(&path, &error));
+                listing.unlisted.push(child);
+                continue;
+            }
+        };
 
         if file_type.is_dir() {
-            if let Err(error) = find_notes(&path, &child, store_folder, found, report) {
+            if let Err(error) = find_notes(&path, &child, store_folder, listing, report) {
                 report.problems.push(IndexProblem::new(&path, &error));
+                listing.unlisted.push(child);
             }
         } else if file_type.is_file()
             && Path::new(&name)
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case(NOTE_EXTENSION))
         {
-            found.push(Found {
+            listing.found.push(Found {
                 path,
                 relative: child,
             });
