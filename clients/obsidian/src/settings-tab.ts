@@ -1,4 +1,4 @@
-import { type App, PluginSettingTab, Setting } from "obsidian";
+import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type TrovePlugin from "./main.ts";
 import { parseFolder } from "./settings.ts";
 
@@ -34,6 +34,8 @@ export class TroveSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.categoryFolder).onChange(async (value) => {
           const folder = parseFolder(value);
           if (folder === undefined) {
+            new Notice(`Trove: ${JSON.stringify(value)} isn't a folder path inside the vault`);
+
             return;
           }
 
