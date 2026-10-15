@@ -2,21 +2,12 @@ mod common;
 
 use std::path::Path;
 
-use common::{Serve, copy_of, indexed, path_str, percent_encode, result_paths};
+use common::{
+    RELATED_VAULT, Serve, copy_of, fixture_notes, indexed, path_str, percent_encode, result_paths,
+};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-/// Notes on coffee, a trip, and three topics unrelated to either.
-const RELATED_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
-
-const NOTES: [&str; 6] = [
-    "Coffee/Espresso.md",
-    "Coffee/Pour over.md",
-    "Travel/Lisbon.md",
-    "Sailing/Knots.md",
-    "Astronomy/Telescope.md",
-    "Taxes/Deductions.md",
-];
 /// Linked from `Coffee/Espresso.md`, on another topic.
 const LINKED: &str = "Travel/Lisbon.md";
 /// Close in meaning to `Coffee/Espresso.md`, with no link either way.
@@ -36,7 +27,7 @@ struct RelatedVault {
 impl RelatedVault {
     fn start() -> Self {
         let vault = copy_of(Path::new(RELATED_VAULT));
-        let serve = Serve::start_in(indexed(vault.path()));
+        let serve = Serve::start_indexed(indexed(vault.path()));
 
         Self { serve, vault }
     }
@@ -83,11 +74,11 @@ fn linked_and_close_notes_rank_above_unrelated_ones() {
 fn a_note_is_never_in_its_own_list() {
     let vault = RelatedVault::start();
 
-    for note in NOTES {
-        let (status, response) = vault.related_to(note);
+    for note in fixture_notes(Path::new(RELATED_VAULT)) {
+        let (status, response) = vault.related_to(&note);
         assert_eq!(status, 200, "{note}: {response}");
         assert!(
-            !result_paths(&response).contains(&note),
+            !result_paths(&response).contains(&note.as_str()),
             "{note}: {response}"
         );
     }

@@ -1,67 +1,29 @@
 mod common;
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    fs,
-    path::Path,
-};
+use std::{collections::BTreeSet, fs, path::Path};
 
-use common::{Serve, copy_of, indexed, run};
+use common::{CATEGORIES_VAULT, Serve, copy_of, fixture_notes, indexed, members, run};
 use serde_json::Value;
-
-/// Two unrelated topics: sailing, and a larger kitchen topic of bread and cheese notes tied together by two hub notes.
-const VAULT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/categories-vault"
-);
 
 fn is_kitchen(path: &str) -> bool {
     !path.starts_with("Sailing/")
 }
 
-struct Categories {
-    by_id: HashMap<u64, Value>,
+fn all(response: &Value) -> &Vec<Value> {
+    response["categories"].as_array().unwrap()
 }
 
-impl Categories {
-    fn new(response: &Value) -> Self {
-        let by_id = response["categories"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|category| (category["id"].as_u64().unwrap(), category.clone()))
-            .collect();
+fn top_level(response: &Value) -> impl Iterator<Item = &Value> {
+    all(response)
+        .iter()
+        .filter(|category| category["parent"].is_null())
+}
 
-        Self { by_id }
-    }
-
-    fn top_level(&self) -> impl Iterator<Item = &Value> {
-        self.by_id
-            .values()
-            .filter(|category| category["parent"].is_null())
-    }
-
-    fn children(&self, id: u64) -> Vec<&Value> {
-        self.by_id
-            .values()
-            .filter(|category| category["parent"].as_u64() == Some(id))
-            .collect()
-    }
-
-    /// The paths of the notes in a category and its subcategories.
-    fn members(&self, category: &Value) -> BTreeSet<String> {
-        let mut members: BTreeSet<String> = category["notes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|note| note["path"].as_str().unwrap().to_owned())
-            .collect();
-        for child in self.children(category["id"].as_u64().unwrap()) {
-            members.extend(self.members(child));
-        }
-
-        members
-    }
+fn children<'a>(response: &'a Value, category: &Value) -> Vec<&'a Value> {
+    all(response)
+        .iter()
+        .filter(|child| child["parent"] == category["id"])
+        .collect()
 }
 
 fn name_terms(category: &Value) -> Vec<&str> {
@@ -69,7 +31,7 @@ fn name_terms(category: &Value) -> Vec<&str> {
 }
 
 fn words(note: &str) -> BTreeSet<String> {
-    fs::read_to_string(Path::new(VAULT).join(note))
+    fs::read_to_string(Path::new(CATEGORIES_VAULT).join(note))
         .unwrap()
         .to_lowercase()
         .split(|c: char| !c.is_alphanumeric() && c != '\'')
@@ -79,45 +41,21 @@ fn words(note: &str) -> BTreeSet<String> {
 
 #[test]
 fn categories_follow_the_topics_and_are_the_same_each_time() {
-    let vault = copy_of(Path::new(VAULT));
+    let vault = copy_of(Path::new(CATEGORIES_VAULT));
     let data_dir = indexed(vault.path());
     let response: Value =
         serde_json::from_str(&run(data_dir.path(), &["categories", "--json"])).unwrap();
-    let categories = Categories::new(&response);
 
-    let all_notes: BTreeSet<String> = ["Bread", "Cheese", "Sailing"]
-        .iter()
-        .flat_map(|folder| fs::read_dir(Path::new(VAULT).join(folder)).unwrap())
-        .map(|entry| {
-            let entry = entry.unwrap();
-            let folder = entry
-                .path()
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_owned();
-            format!(
-                "{}/{}",
-                folder.to_str().unwrap(),
-                entry.file_name().to_str().unwrap()
-            )
-        })
-        .chain([
-            "Fermentation.md".to_owned(),
-            "Kitchen projects.md".to_owned(),
-        ])
-        .collect();
-    let categorised: BTreeSet<String> = categories
-        .top_level()
-        .flat_map(|category| categories.members(category))
+    let all_notes = fixture_notes(Path::new(CATEGORIES_VAULT));
+    let categorised: BTreeSet<String> = top_level(&response)
+        .flat_map(|category| members(&response, category))
         .collect();
     assert_eq!(categorised, all_notes);
 
     // Each top-level category holds one topic, and the kitchen topic is a single one with subcategories.
     let mut kitchen = Vec::new();
-    for category in categories.top_level() {
-        let members = categories.members(category);
+    for category in top_level(&response) {
+        let members = members(&response, category);
         let topics: BTreeSet<bool> = members.iter().map(|path| is_kitchen(path)).collect();
         assert_eq!(topics.len(), 1, "{members:?} mixes the topics");
         if topics.contains(&true) {
@@ -130,12 +68,12 @@ fn categories_follow_the_topics_and_are_the_same_each_time() {
             kitchen.len()
         );
     };
-    let subcategories = categories.children(kitchen["id"].as_u64().unwrap());
+    let subcategories = children(&response, kitchen);
     assert!(subcategories.len() >= 2, "{kitchen:#}");
     assert!(kitchen["notes"].as_array().unwrap().is_empty());
 
-    for category in categories.by_id.values() {
-        let members = categories.members(category);
+    for category in all(&response) {
+        let members = members(&response, category);
         let start_here = category["start_here"]["path"].as_str().unwrap();
         assert!(
             members.contains(start_here),
@@ -153,8 +91,8 @@ fn categories_follow_the_topics_and_are_the_same_each_time() {
     }
 
     // Top-level names use no word of the other topic.
-    for category in categories.top_level() {
-        let members = categories.members(category);
+    for category in top_level(&response) {
+        let members = members(&response, category);
         let other_topic: BTreeSet<String> = all_notes
             .iter()
             .filter(|note| is_kitchen(note) != members.iter().any(|path| is_kitchen(path)))
@@ -178,7 +116,7 @@ fn categories_follow_the_topics_and_are_the_same_each_time() {
     }
 
     // A second data folder on the same vault, read over HTTP, gives the same hierarchy.
-    let serve = Serve::start_in(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let (status, over_http) = serve.call("GET", "/categories", None);
     assert_eq!(status, 200);
     assert_eq!(over_http, response);
@@ -221,8 +159,8 @@ fn set_property(note: &Path, name: &str, value: &str) {
 
 #[test]
 fn category_notes_in_the_excluded_folder_leave_the_categories_unchanged() {
-    let vault = copy_of(Path::new(VAULT));
-    let serve = Serve::start_in(indexed(vault.path()));
+    let vault = copy_of(Path::new(CATEGORIES_VAULT));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let excluding = "/categories?exclude_folder=Categories";
     let (status, before) = serve.call("GET", excluding, None);
     assert_eq!(status, 200, "{before}");

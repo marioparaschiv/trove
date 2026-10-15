@@ -1,9 +1,6 @@
 mod common;
 
-use std::{
-    fs,
-    io::{BufRead, BufReader},
-};
+use std::fs;
 
 use common::{Serve, read_runtime, runtime_path, stdout, trove};
 use serde_json::Value;
@@ -24,25 +21,8 @@ fn event_stream_ends_with_stopping_when_the_service_goes_idle() {
     let (status, body) = serve.get("/status", &serve.local_host(), Some(&serve.token));
     assert_eq!(status, 200, "{body}");
 
-    let events = serve.send(
-        "GET",
-        "/events",
-        &serve.local_host(),
-        Some(&serve.token),
-        None,
-    );
-    let lines: Vec<String> = BufReader::new(events).lines().map(Result::unwrap).collect();
-
-    let data: Vec<Value> = lines
-        .iter()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .map(|data| serde_json::from_str(data).unwrap())
-        .collect();
     // The startup index run may come before it.
-    assert_eq!(
-        data.last(),
-        Some(&serde_json::json!({ "type": "stopping" }))
-    );
+    serve.events().until("stopping");
     assert!(serve.child.wait().unwrap().success());
     assert!(!runtime_path(&serve.data_dir).exists());
 }

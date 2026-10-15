@@ -3,15 +3,16 @@
 #![allow(dead_code, reason = "each test binary uses a different part")]
 
 use std::{
+    collections::BTreeSet,
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, ErrorKind, Read, Write},
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     time::Duration,
 };
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use trove_core::model_setup::{
     MODEL_FILE, MODEL_REPO, MODEL_REVISION, MODELS_FOLDER, ModelFile, hf_hub_cache,
@@ -20,6 +21,16 @@ use trove_core::model_setup::{
 /// A small vault of notes on clearly separate topics, plus notes in `.obsidian` and `.trash` that must never be
 /// indexed. Extend it with notes on new topics; keep each note's topic distinct from the others.
 pub const FIXTURE_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/vault");
+
+/// Two unrelated topics: sailing, and a larger kitchen topic of bread and cheese notes tied together by two hub notes.
+pub const CATEGORIES_VAULT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/categories-vault"
+);
+
+/// Notes on coffee, a trip, and three topics unrelated to either.
+pub const RELATED_VAULT: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
 
 pub fn trove(data_dir: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_trove"));
@@ -86,6 +97,41 @@ fn copy_folder(from: &Path, to: &Path) {
             copy_folder(&entry.path(), &target);
         } else {
             fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// The paths of the notes in a fixture vault, relative to it, leaving out hidden folders as indexing does.
+pub fn fixture_notes(vault: &Path) -> BTreeSet<String> {
+    let mut notes = BTreeSet::new();
+    collect_notes(vault, vault, &mut notes);
+
+    notes
+}
+
+fn collect_notes(root: &Path, folder: &Path, notes: &mut BTreeSet<String>) {
+    for entry in fs::read_dir(folder).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap().starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        if path.is_dir() {
+            collect_notes(root, &path, notes);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            let relative = path.strip_prefix(root).unwrap();
+            notes.insert(path_str(relative).to_owned());
+        }
+    }
+}
+
+/// Deletes the index database of `data_dir`, leaving everything else in it.
+pub fn remove_index(data_dir: &Path) {
+    for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
+        let path = data_dir.join(name);
+        if path.exists() {
+            fs::remove_file(path).unwrap();
         }
     }
 }
@@ -162,6 +208,32 @@ impl Serve {
             child,
             data_dir,
         }
+    }
+
+    /// Starts `trove serve` on `data_dir` and returns once its startup index run is done, so a later subscription to
+    /// the events stream sees none of that run's events.
+    pub fn start_indexed(data_dir: TempDir) -> Self {
+        let serve = Self::start_in(data_dir);
+        let mut events = serve.events();
+        if serve.status()["indexing"]["busy"] == true {
+            events.until("index_finished");
+        }
+
+        serve
+    }
+
+    pub fn status(&self) -> Value {
+        let (status, body) = self.call("GET", "/status", None);
+        assert_eq!(status, 200, "{body}");
+
+        body
+    }
+
+    pub fn search(&self, query: &str) -> Value {
+        let (status, response) = self.call("POST", "/search", Some(&json!({ "query": query })));
+        assert_eq!(status, 200, "{response}");
+
+        response
     }
 
     pub fn local_host(&self) -> String {
@@ -317,9 +389,33 @@ pub fn runtime_path(data_dir: &TempDir) -> PathBuf {
 }
 
 pub fn read_runtime(data_dir: &TempDir) -> Option<Value> {
-    let text = fs::read_to_string(runtime_path(data_dir)).ok()?;
+    let text = match fs::read_to_string(runtime_path(data_dir)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return None,
+        Err(error) => panic!("reading the runtime file: {error}"),
+    };
 
     Some(serde_json::from_str(&text).unwrap())
+}
+
+/// The paths of the notes in a category of a categories response and in its subcategories.
+pub fn members(response: &Value, category: &Value) -> BTreeSet<String> {
+    let mut members: BTreeSet<String> = category["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|note| note["path"].as_str().unwrap().to_owned())
+        .collect();
+    for child in response["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|child| child["parent"] == category["id"])
+    {
+        members.extend(self::members(response, child));
+    }
+
+    members
 }
 
 /// Encodes `text` for a URL query string.

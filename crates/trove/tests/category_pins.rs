@@ -1,16 +1,9 @@
 mod common;
 
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{fs, path::Path};
 
-use common::{Serve, copy_of, indexed, path_str, run};
+use common::{CATEGORIES_VAULT, Serve, copy_of, indexed, members, path_str, run};
 use serde_json::{Value, json};
-use tempfile::TempDir;
-
-/// Two unrelated topics: sailing, and a larger kitchen topic of bread and cheese notes tied together by two hub notes.
-const VAULT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/tests/fixtures/categories-vault"
-);
 
 /// In the sail handling category, which the navigation category is merged into.
 const POINTS_OF_SAIL: &str = "Sailing/Points of sail.md";
@@ -20,18 +13,6 @@ const MOZZARELLA: &str = "Cheese/Mozzarella stretching.md";
 const RENNET: &str = "Cheese/Rennet and curds.md";
 /// A sailing note added after the pins.
 const HEAVING_TO: &str = "Sailing/Heaving to.md";
-
-/// Starts a service on `data_dir` and waits out its startup index run.
-fn start(data_dir: TempDir) -> Serve {
-    let serve = Serve::start_in(data_dir);
-    let mut events = serve.events();
-    let (_, status) = serve.call("GET", "/status", None);
-    if status["indexing"]["busy"] == true {
-        events.until("index_finished");
-    }
-
-    serve
-}
 
 fn categories(serve: &Serve) -> Value {
     let (status, response) = serve.call("GET", "/categories", None);
@@ -71,24 +52,6 @@ fn named<'a>(response: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no category is named {name}: {response:#}"))
 }
 
-/// The paths of the notes in a category and its subcategories.
-fn members(response: &Value, category: &Value) -> BTreeSet<String> {
-    let mut members: BTreeSet<String> = category["notes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|note| note["path"].as_str().unwrap().to_owned())
-        .collect();
-    for child in all(response)
-        .iter()
-        .filter(|child| child["parent"] == category["id"])
-    {
-        members.extend(self::members(response, child));
-    }
-
-    members
-}
-
 /// What every run after the pins must show: the renamed, merged sailing category holding every sailing note, and the
 /// moved note in the cheese category, which is moved to the top level.
 fn assert_pins_hold(response: &Value) {
@@ -117,8 +80,8 @@ fn assert_pins_hold(response: &Value) {
 
 #[test]
 fn pinned_renames_moves_and_merges_hold_after_later_runs_and_on_another_device() {
-    let vault = copy_of(Path::new(VAULT));
-    let serve = start(indexed(vault.path()));
+    let vault = copy_of(Path::new(CATEGORIES_VAULT));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let before = categories(&serve);
 
     let sail_handling = category_of(&before, POINTS_OF_SAIL);
@@ -196,8 +159,8 @@ fn pinned_renames_moves_and_merges_hold_after_later_runs_and_on_another_device()
 
 #[test]
 fn pins_need_a_source_and_names() {
-    let vault = copy_of(Path::new(VAULT));
-    let serve = start(indexed(vault.path()));
+    let vault = copy_of(Path::new(CATEGORIES_VAULT));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let note_pin =
         |category: &str| json!([{ "type": "note", "path": RENNET, "category": category }]);
 

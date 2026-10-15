@@ -1,4 +1,4 @@
-use std::process::Command;
+mod common;
 
 #[test]
 fn invalid_config_values_fail_naming_the_field() {
@@ -15,9 +15,8 @@ fn invalid_config_values_fail_naming_the_field() {
         let data_dir = tempfile::tempdir().unwrap();
         std::fs::write(data_dir.path().join("config.toml"), config).unwrap();
 
-        let output = Command::new(env!("CARGO_BIN_EXE_trove"))
+        let output = common::trove(data_dir.path())
             .arg("status")
-            .env("TROVE_DATA_DIR", data_dir.path())
             .output()
             .unwrap();
 

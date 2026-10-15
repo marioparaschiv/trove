@@ -8,9 +8,10 @@ use std::{
 };
 
 use common::{
-    Serve, data_dir_with_model, indexed, path_str, result_paths, run, search, vault_copy,
+    Serve, data_dir_with_model, indexed, path_str, remove_index, result_paths, run, search,
+    vault_copy,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const STORE_FOLDER: &str = ".trove";
@@ -67,13 +68,6 @@ fn index_counts(output: &str) -> (u64, u64) {
     (notes.parse().unwrap(), embedded.parse().unwrap())
 }
 
-fn status(serve: &Serve) -> Value {
-    let (status, body) = serve.call("GET", "/status", None);
-    assert_eq!(status, 200, "{body}");
-
-    body
-}
-
 #[test]
 fn indexing_the_same_vault_twice_writes_identical_vector_files() {
     let vault = vault_copy();
@@ -95,20 +89,11 @@ fn a_rebuilt_index_makes_no_model_calls() {
     let before = run(data_dir.path(), &["status"]);
     let files = store_files(&vault.path().join(STORE_FOLDER));
 
-    for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
-        let path = data_dir.path().join(name);
-        if path.exists() {
-            fs::remove_file(path).unwrap();
-        }
-    }
+    remove_index(data_dir.path());
     run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
-    let serve = Serve::start_in(data_dir);
-    let mut events = serve.events();
-    if status(&serve)["indexing"]["busy"] == true {
-        events.until("index_finished");
-    }
+    let serve = Serve::start_indexed(data_dir);
 
-    let status = status(&serve);
+    let status = serve.status();
     assert_eq!(status["indexing"]["embedded"], 0, "{status}");
     assert_eq!(status["model"]["loaded"], false, "{status}");
     assert_eq!(
@@ -256,17 +241,8 @@ fn a_running_service_imports_a_vector_file_arriving_from_another_device() {
     )
     .unwrap();
     run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
-    let serve = Serve::start_in(data_dir);
-    let mut events = serve.events();
-    if status(&serve)["indexing"]["busy"] == true {
-        events.until("index_finished");
-    }
-    let search = |query: &str| {
-        let (status, response) = serve.call("POST", "/search", Some(&json!({ "query": query })));
-        assert_eq!(status, 200, "{response}");
-        response
-    };
-    assert_eq!(result_paths(&search(PARAPHRASE))[0], PARAPHRASE_NOTE);
+    let serve = Serve::start_indexed(data_dir);
+    assert_eq!(result_paths(&serve.search(PARAPHRASE))[0], PARAPHRASE_NOTE);
 
     // Another device's file for the note: the same text, with the other note's vectors.
     let path = vector_file(vault.path(), PARAPHRASE_NOTE);
@@ -291,9 +267,9 @@ fn a_running_service_imports_a_vector_file_arriving_from_another_device() {
             "report": { "files": 1, "removed": 0, "embedded": 0, "problems": [] },
         })
     );
-    assert_eq!(status(&serve)["indexing"]["embedded"], 0);
+    assert_eq!(serve.status()["indexing"]["embedded"], 0);
     // The note now has the other note's meaning.
-    let response = search(PARAPHRASE);
+    let response = serve.search(PARAPHRASE);
     assert!(
         !result_paths(&response).contains(&PARAPHRASE_NOTE),
         "{response}"

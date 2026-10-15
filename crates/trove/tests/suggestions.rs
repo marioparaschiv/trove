@@ -2,31 +2,15 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{Serve, copy_of, indexed, path_str, percent_encode, run};
+use common::{RELATED_VAULT, Serve, copy_of, indexed, path_str, percent_encode, remove_index, run};
 use serde_json::json;
-use tempfile::TempDir;
 use trove_core::sync_store::{SuggestionState, SyncStore, note_pair};
-
-/// Notes on coffee, a trip, and three topics unrelated to either.
-const RELATED_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
 
 const ESPRESSO: &str = "Coffee/Espresso.md";
 /// Close in meaning to `ESPRESSO`, with no link either way.
 const POUR_OVER: &str = "Coffee/Pour over.md";
 /// Linked from `ESPRESSO`.
 const LISBON: &str = "Travel/Lisbon.md";
-
-/// Starts a service on `data_dir` and waits out its startup index run.
-fn start(data_dir: TempDir) -> Serve {
-    let serve = Serve::start_in(data_dir);
-    let mut events = serve.events();
-    let (_, status) = serve.call("GET", "/status", None);
-    if status["indexing"]["busy"] == true {
-        events.until("index_finished");
-    }
-
-    serve
-}
 
 fn suggested_pairs(serve: &Serve, vault: &Path) -> Vec<[String; 2]> {
     let path = format!("/suggestions?source={}", percent_encode(path_str(vault)));
@@ -76,7 +60,7 @@ fn index(serve: &Serve) {
 #[test]
 fn similar_unlinked_notes_are_suggested_until_linked_or_decided() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let serve = start(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
 
     let path = format!(
         "/suggestions?source={}",
@@ -108,7 +92,7 @@ fn similar_unlinked_notes_are_suggested_until_linked_or_decided() {
 #[test]
 fn an_accepted_suggestion_is_not_suggested_again() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let serve = start(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
 
     decide(&serve, vault.path(), POUR_OVER, ESPRESSO, "accepted");
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
@@ -119,19 +103,14 @@ fn an_accepted_suggestion_is_not_suggested_again() {
 #[test]
 fn a_dismissed_suggestion_stays_dismissed_after_the_index_is_rebuilt() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let serve = start(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     decide(&serve, vault.path(), ESPRESSO, POUR_OVER, "dismissed");
     assert!(!is_suggested(&serve, vault.path(), ESPRESSO, POUR_OVER));
     let data_dir = serve.stop_keeping_data();
 
-    for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
-        let path = data_dir.path().join(name);
-        if path.exists() {
-            fs::remove_file(path).unwrap();
-        }
-    }
+    remove_index(data_dir.path());
     run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
-    let rebuilt = start(data_dir);
+    let rebuilt = Serve::start_indexed(data_dir);
     assert!(!is_suggested(&rebuilt, vault.path(), ESPRESSO, POUR_OVER));
 
     rebuilt.stop();
@@ -149,8 +128,8 @@ fn merged_state(vault: &Path) -> Option<SuggestionState> {
 #[test]
 fn decisions_from_two_data_folders_merge_and_the_latest_wins() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let first = start(indexed(vault.path()));
-    let second = start(indexed(vault.path()));
+    let first = Serve::start_indexed(indexed(vault.path()));
+    let second = Serve::start_indexed(indexed(vault.path()));
 
     decide(&first, vault.path(), ESPRESSO, POUR_OVER, "dismissed");
     assert!(!is_suggested(&second, vault.path(), ESPRESSO, POUR_OVER));
@@ -176,7 +155,7 @@ fn decisions_from_two_data_folders_merge_and_the_latest_wins() {
 #[test]
 fn orphans_are_the_notes_with_no_link_in_or_out() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let serve = start(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let source = format!("source={}", percent_encode(path_str(vault.path())));
 
     let expected = [
@@ -211,7 +190,7 @@ fn orphans_are_the_notes_with_no_link_in_or_out() {
 #[test]
 fn bad_requests_are_refused() {
     let vault = copy_of(Path::new(RELATED_VAULT));
-    let serve = start(indexed(vault.path()));
+    let serve = Serve::start_indexed(indexed(vault.path()));
     let source = percent_encode(path_str(vault.path()));
 
     for (path, expected) in [
