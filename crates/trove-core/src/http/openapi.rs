@@ -7,11 +7,12 @@ use utoipa::{
 };
 
 use super::{error::ErrorBody, runtime::RuntimeFile};
+use crate::model_setup;
 
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Trove", description = "Local search over an Obsidian vault"),
-    components(schemas(RuntimeFile)),
+    components(schemas(RuntimeFile, model_setup::Event, model_setup::Source)),
     security(("token" = [])),
     modifiers(&Adjust),
 )]

@@ -1,4 +1,4 @@
-import { connect, type TroveClient } from "@trove/client";
+import type { TroveClient } from "@trove/client";
 import {
   type App,
   debounce,
@@ -9,13 +9,11 @@ import {
   prepareFuzzySearch,
   renderResults,
   SuggestModal,
-  stripHeadingForLink,
 } from "obsidian";
-import { obsidianFetch } from "./obsidian-fetch.ts";
+import { connectTo, failure, message, noteLink, vaultSource } from "./connection.ts";
 import {
   type FileSuggestion,
   inVault,
-  isSameFolder,
   merge,
   type Suggestion,
   type TroveResult,
@@ -35,7 +33,7 @@ export class Switcher extends SuggestModal<Suggestion> {
     true,
   );
 
-  constructor(app: App, binaryPath: string, vaultPath: string) {
+  constructor(app: App, binary: Promise<string>, vaultPath: string) {
     super(app);
     this.vaultPath = vaultPath;
     this.setPlaceholder("Find a note by name or meaning...");
@@ -46,7 +44,7 @@ export class Switcher extends SuggestModal<Suggestion> {
       { command: "esc", purpose: "to dismiss" },
     ]);
 
-    this.connection = this.start(binaryPath);
+    this.connection = this.start(binary);
     this.connection.catch((error: unknown) => this.fail(error));
   }
 
@@ -100,22 +98,11 @@ export class Switcher extends SuggestModal<Suggestion> {
     this.searchSoon.cancel();
   }
 
-  private async start(binaryPath: string): Promise<TroveClient> {
-    if (binaryPath === "") {
-      throw new Error("set the path to the trove binary in the Trove settings");
-    }
-
-    const { client } = await connect({ binary: binaryPath, fetch: obsidianFetch });
+  private async start(binary: Promise<string>): Promise<TroveClient> {
+    const client = await connectTo(await binary);
     void this.prewarm(client);
 
-    const sources = await client.GET("/sources");
-    if (sources.data === undefined) {
-      throw failure("listing sources", sources.response, sources.error);
-    }
-
-    if (
-      !sources.data.some((source) => isSameFolder(source.path, this.vaultPath, process.platform))
-    ) {
+    if ((await vaultSource(client, this.vaultPath)) === undefined) {
       throw new Error(
         `this vault isn't a Trove source; run trove sources add "${this.vaultPath}", then trove index`,
       );
@@ -194,25 +181,9 @@ export class Switcher extends SuggestModal<Suggestion> {
 
 /** A link to the note, at the matched heading for Trove results. */
 function linkTo(suggestion: Suggestion): string {
-  if (suggestion.kind === "file") {
-    return suggestion.path;
-  }
-
-  const { path, heading_path } = suggestion.result;
-
-  return [path, ...heading_path.map(stripHeadingForLink)].join("#");
+  return suggestion.kind === "file" ? suggestion.path : noteLink(suggestion.result);
 }
 
 function withoutExtension(path: string): string {
   return path.endsWith(".md") ? path.slice(0, -".md".length) : path;
-}
-
-function failure(action: string, response: Response, error: { error: string } | undefined): Error {
-  return new Error(
-    `${action} failed with ${response.status}: ${error?.error ?? response.statusText}`,
-  );
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

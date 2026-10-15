@@ -5,8 +5,9 @@
   "scripts": {
     "typecheck": "tsc",
     "lint": "biome check .",
-    "test": "node --test src/*.test.ts",
-    "build": "tsc && bun build src/main.ts --outfile main.js --target node --format cjs --external obsidian --external electron"
+    "test": "cargo build --quiet --package trove && node --test src/*.test.ts",
+    "build": "tsc && bun run bundle",
+    "bundle": "bun build src/main.ts --outfile main.js --target node --format cjs --external obsidian --external electron --env 'TROVE_RELEASE_*'"
   },
   "dependencies": {
     "@trove/client": "workspace:*"
