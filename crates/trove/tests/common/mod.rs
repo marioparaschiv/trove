@@ -8,6 +8,7 @@ use std::{
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Output, Stdio},
+    time::Duration,
 };
 
 use serde_json::Value;
@@ -209,9 +210,76 @@ impl Serve {
         stream
     }
 
+    /// Subscribes to `GET /events`. The subscription is open once this returns, so no later event is missed.
+    pub fn events(&self) -> Events {
+        let stream = self.send(
+            "GET",
+            "/events",
+            &self.local_host(),
+            Some(&self.token),
+            None,
+        );
+        // Turns an event that never comes into a failure instead of a hung test.
+        stream
+            .set_read_timeout(Some(Duration::from_secs(300)))
+            .unwrap();
+
+        let mut reader = BufReader::new(stream);
+        let mut status_line = String::new();
+        reader.read_line(&mut status_line).unwrap();
+        assert!(status_line.starts_with("HTTP/1.1 200"), "{status_line}");
+        let mut line = String::new();
+        while line != "\r\n" {
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+        }
+
+        Events(reader)
+    }
+
     pub fn stop(mut self) {
         self.child.kill().unwrap();
         self.child.wait().unwrap();
+    }
+}
+
+// A test that fails before `stop` would otherwise leave the service running until its idle timeout.
+impl Drop for Serve {
+    fn drop(&mut self) {
+        if let Ok(None) = self.child.try_wait() {
+            self.child.kill().unwrap();
+            self.child.wait().unwrap();
+        }
+    }
+}
+
+/// An open `GET /events` stream.
+pub struct Events(BufReader<TcpStream>);
+
+impl Events {
+    /// The data of the next event.
+    pub fn next(&mut self) -> Value {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            assert_ne!(self.0.read_line(&mut line).unwrap(), 0, "the stream ended");
+            if let Some(data) = line.strip_prefix("data: ") {
+                return serde_json::from_str(data).unwrap();
+            }
+        }
+    }
+
+    /// Every event up to and including the next one of type `kind`.
+    pub fn until(&mut self, kind: &str) -> Vec<Value> {
+        let mut events = Vec::new();
+        loop {
+            let event = self.next();
+            let done = event["type"] == kind;
+            events.push(event);
+            if done {
+                return events;
+            }
+        }
     }
 }
 

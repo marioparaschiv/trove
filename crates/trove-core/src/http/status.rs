@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 use super::{
     AppState,
     error::{ApiError, ErrorBody},
+    indexing::IndexingStatus,
     model::ModelStatus,
     openapi::Rejected,
 };
@@ -18,6 +19,7 @@ pub struct Status {
     pub pid: u32,
     pub index: IndexStats,
     pub model: ModelStatus,
+    pub indexing: IndexingStatus,
 }
 
 #[utoipa::path(
@@ -45,5 +47,6 @@ pub(super) async fn status(State(state): State<Arc<AppState>>) -> Result<Json<St
         pid: state.runtime.pid,
         index: stats,
         model: ModelStatus { loaded },
+        indexing: state.indexing.status(),
     }))
 }
