@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use common::{Serve, indexed, run};
+use common::{Serve, copy_of, indexed, run};
 use serde_json::Value;
 
 /// Two unrelated topics: sailing, and a larger kitchen topic of bread and cheese notes tied together by two hub notes.
@@ -79,7 +79,8 @@ fn words(note: &str) -> BTreeSet<String> {
 
 #[test]
 fn categories_follow_the_topics_and_are_the_same_each_time() {
-    let data_dir = indexed(Path::new(VAULT));
+    let vault = copy_of(Path::new(VAULT));
+    let data_dir = indexed(vault.path());
     let response: Value =
         serde_json::from_str(&run(data_dir.path(), &["categories", "--json"])).unwrap();
     let categories = Categories::new(&response);
@@ -177,7 +178,7 @@ fn categories_follow_the_topics_and_are_the_same_each_time() {
     }
 
     // A second data folder on the same vault, read over HTTP, gives the same hierarchy.
-    let serve = Serve::start_in(indexed(Path::new(VAULT)));
+    let serve = Serve::start_in(indexed(vault.path()));
     let (status, over_http) = serve.call("GET", "/categories", None);
     assert_eq!(status, 200);
     assert_eq!(over_http, response);

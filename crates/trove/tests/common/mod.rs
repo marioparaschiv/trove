@@ -66,10 +66,15 @@ pub fn data_dir_with_model() -> TempDir {
 
 /// A copy of the fixture vault that a test may change.
 pub fn vault_copy() -> TempDir {
-    let vault = tempfile::tempdir().unwrap();
-    copy_folder(Path::new(FIXTURE_VAULT), vault.path());
+    copy_of(Path::new(FIXTURE_VAULT))
+}
 
-    vault
+/// A copy of a fixture vault that a test may change, and that indexing may write its store folder into.
+pub fn copy_of(vault: &Path) -> TempDir {
+    let copy = tempfile::tempdir().unwrap();
+    copy_folder(vault, copy.path());
+
+    copy
 }
 
 fn copy_folder(from: &Path, to: &Path) {
