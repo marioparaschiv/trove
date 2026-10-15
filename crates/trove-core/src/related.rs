@@ -71,12 +71,11 @@ pub fn related(
         (file_id, VaultGraph::load(index.connection())?)
     };
 
-    let seeds: Vec<(usize, f32)> = graph
+    // The note was read under the same lock the graph was built from.
+    let node = graph
         .note_node(file_id)
-        .map(|node| (node, 1.0))
-        .into_iter()
-        .collect();
-    let ranks = graph.graph.personalized_pagerank(&seeds);
+        .expect("an indexed note is in the graph");
+    let ranks = graph.graph.personalized_pagerank(&[(node, 1.0)]);
 
     let mut sections: Vec<(i64, f32)> = graph
         .note_ranks(&ranks)

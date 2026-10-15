@@ -5,12 +5,12 @@ mod vault;
 
 pub use folder::{ExcludedFolder, InvalidFolder};
 pub(crate) use node_key::{EdgeKind, NodeKey};
-pub(crate) use vault::{Node, VaultGraph};
+pub(crate) use vault::VaultGraph;
 
 /// Chance that a step of the walk jumps back to the seeds.
-pub const RESTART: f32 = 0.15;
+const RESTART: f32 = 0.15;
 /// Power iterations of personalised PageRank.
-pub const ITERATIONS: usize = 20;
+const ITERATIONS: usize = 20;
 
 /// An undirected graph with weighted edges, for walks over notes, sections and tags.
 #[derive(Debug, Clone, Default)]

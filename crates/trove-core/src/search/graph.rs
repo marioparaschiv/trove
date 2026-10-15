@@ -5,7 +5,7 @@ use std::{
 
 use super::{Candidate, Query, SearchError, Signal, Stage};
 use crate::{
-    graph::{Node, VaultGraph},
+    graph::VaultGraph,
     index::{self, Index},
 };
 
@@ -62,9 +62,10 @@ impl Stage for GraphRerank<'_> {
             return Ok(candidates);
         }
 
-        let note_of = |chunk_id| match graph.chunk_node(chunk_id).map(|node| graph.nodes[node]) {
-            Some(Node::Section(section)) => Some(section.file_id),
-            _ => None,
+        let note_of = |chunk_id| {
+            graph
+                .chunk_node(chunk_id)
+                .and_then(|node| graph.nodes[node].file_id())
         };
         let found_notes: HashSet<i64> = candidates
             .iter()

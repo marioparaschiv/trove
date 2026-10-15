@@ -54,6 +54,15 @@ impl Index {
         Ok(sources)
     }
 
+    /// The id of the source at `path`, as registered.
+    pub(crate) fn source_id(&self, path: &str) -> rusqlite::Result<Option<i64>> {
+        self.conn
+            .query_row("SELECT id FROM sources WHERE path = ?1", [path], |row| {
+                row.get(0)
+            })
+            .optional()
+    }
+
     /// Registers the folder at `path`, which must be absolute.
     pub fn add_source(&mut self, path: &Path) -> Result<Source, SourceError> {
         let path = normalised(path)?;

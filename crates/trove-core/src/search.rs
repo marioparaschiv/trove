@@ -13,13 +13,13 @@ use utoipa::ToSchema;
 
 use crate::embedder::EmbedderError;
 
-pub use collapse::CollapseToNotes;
-pub use fusion::Fusion;
-pub use graph::GraphRerank;
-pub use meaning::Meaning;
+pub(crate) use collapse::CollapseToNotes;
+pub(crate) use fusion::Fusion;
+pub(crate) use graph::GraphRerank;
+pub(crate) use meaning::Meaning;
 pub(crate) use request::results;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
-pub use words::Words;
+pub(crate) use words::Words;
 
 pub struct Query {
     pub text: String,

@@ -124,11 +124,10 @@ pub fn suggestions(
 
     let (notes, links, similar) = {
         let index = index::lock(index);
-        let conn = index.connection();
-        let notes = source_notes(conn, &request.source, request.exclude_folder.as_ref())?;
-        let graph = VaultGraph::load_without(conn, request.exclude_folder.as_ref())?;
+        let graph = VaultGraph::load_without(index.connection(), request.exclude_folder.as_ref())?;
+        let notes = source_notes(&index, &request.source, &graph)?;
 
-        (notes, graph.links, similar_notes(conn)?)
+        (notes, graph.links, similar_notes(index.connection())?)
     };
     let states = SyncStore::new(Path::new(&request.source), store_folder).suggestion_states()?;
 
@@ -170,10 +169,10 @@ pub fn decide(
 
     // Held while writing, so two decisions at once can't both rewrite this device's file from the same contents.
     let index = index::lock(index);
-    let conn = index.connection();
-    let source_id = source_id(conn, &request.source)?;
+    let source_id = source_id(&index, &request.source)?;
     for path in [&request.note, &request.target] {
-        let indexed: Option<i64> = conn
+        let indexed: Option<i64> = index
+            .connection()
             .query_row(
                 "SELECT id FROM files WHERE source_id = ?1 AND path = ?2",
                 (source_id, path),
@@ -203,9 +202,8 @@ pub fn orphans(
 ) -> Result<OrphansResponse, SuggestionsError> {
     let (notes, links) = {
         let index = index::lock(index);
-        let conn = index.connection();
-        let notes = source_notes(conn, &request.source, request.exclude_folder.as_ref())?;
-        let graph = VaultGraph::load_without(conn, request.exclude_folder.as_ref())?;
+        let graph = VaultGraph::load_without(index.connection(), request.exclude_folder.as_ref())?;
+        let notes = source_notes(&index, &request.source, &graph)?;
 
         (notes, graph.links)
     };
@@ -221,22 +219,21 @@ pub fn orphans(
     Ok(OrphansResponse { notes: orphans })
 }
 
-fn source_id(conn: &Connection, source: &str) -> Result<i64, SuggestionsError> {
-    conn.query_row("SELECT id FROM sources WHERE path = ?1", [source], |row| {
-        row.get(0)
-    })
-    .optional()?
-    .ok_or_else(|| SuggestionsError::UnknownSource(source.to_owned()))
+fn source_id(index: &Index, source: &str) -> Result<i64, SuggestionsError> {
+    index
+        .source_id(source)?
+        .ok_or_else(|| SuggestionsError::UnknownSource(source.to_owned()))
 }
 
-/// The notes of the source outside the excluded folder, by file id.
+/// The notes of the source that are in `graph`, which leaves out the excluded folder, by file id.
 fn source_notes(
-    conn: &Connection,
+    index: &Index,
     source: &str,
-    excluded: Option<&ExcludedFolder>,
+    graph: &VaultGraph,
 ) -> Result<HashMap<i64, CategoryNote>, SuggestionsError> {
-    let source_id = source_id(conn, source)?;
-    let notes = conn
+    let source_id = source_id(index, source)?;
+    let notes = index
+        .connection()
         .prepare("SELECT id, path, title FROM files WHERE source_id = ?1")?
         .query_map([source_id], |row| {
             Ok((
@@ -250,7 +247,7 @@ fn source_notes(
         })?
         .collect::<rusqlite::Result<Vec<(i64, CategoryNote)>>>()?
         .into_iter()
-        .filter(|(_, note)| excluded.is_none_or(|folder| !folder.contains(&note.path)))
+        .filter(|&(file_id, _)| graph.note_node(file_id).is_some())
         .collect();
 
     Ok(notes)

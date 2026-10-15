@@ -14,13 +14,13 @@ use std::{
 
 use network_partitions::{errors::CoreError, leiden, network::prelude::LabeledNetworkBuilder};
 use rand::{SeedableRng, rngs::Xoshiro256PlusPlus};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    graph::{ExcludedFolder, Graph, Node, VaultGraph},
+    graph::{ExcludedFolder, Graph, VaultGraph},
     index::{self, Index, IndexError},
     sync_store::{CategoryPin, Decision, StoreError, SyncStore},
 };
@@ -126,12 +126,7 @@ pub fn categories(
 
     let file_ids: HashMap<(&str, &str), i64> = notes
         .iter()
-        .filter(|(_, note)| {
-            request
-                .exclude_folder
-                .as_ref()
-                .is_none_or(|folder| !folder.contains(&note.path))
-        })
+        .filter(|&(&file_id, _)| graph.note_node(file_id).is_some())
         .map(|(&file_id, note)| ((note.source.as_str(), note.path.as_str()), file_id))
         .collect();
     let mut source_pins = Vec::new();
@@ -203,15 +198,7 @@ pub fn pin(
 
     // Held while writing, so two requests at once can't both rewrite this device's file from the same contents.
     let index = index::lock(index);
-    let registered: Option<i64> = index
-        .connection()
-        .query_row(
-            "SELECT id FROM sources WHERE path = ?1",
-            [&request.source],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if registered.is_none() {
+    if index.source_id(&request.source)?.is_none() {
         return Err(CategoriesError::UnknownSource(request.source));
     }
 
@@ -294,11 +281,7 @@ fn notes(conn: &Connection) -> rusqlite::Result<HashMap<i64, CategoryNote>> {
 /// A tag on k notes joins each two of them with 1/(k-1) of its weight, so each note's tag weight is what it is in the
 /// full graph.
 fn note_edges(graph: &VaultGraph) -> BTreeMap<(i64, i64), f64> {
-    let note_of = |node: usize| match graph.nodes[node] {
-        Node::Note(file_id) => Some(file_id),
-        Node::Section(section) => Some(section.file_id),
-        Node::Tag => None,
-    };
+    let note_of = |node: usize| graph.nodes[node].file_id();
 
     let mut weights: BTreeMap<(i64, i64), f64> = BTreeMap::new();
     let mut add = |a: i64, b: i64, weight: f64| {
