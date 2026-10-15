@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "preserve",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src", "raycast-env.d.ts"]
+}

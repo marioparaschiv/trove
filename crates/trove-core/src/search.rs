@@ -1,23 +1,52 @@
 mod collapse;
+mod fusion;
 mod meaning;
 mod request;
+mod words;
 
+use std::{collections::BTreeSet, fmt};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::embedder::EmbedderError;
 
 pub use collapse::CollapseToNotes;
+pub use fusion::Fusion;
 pub use meaning::Meaning;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
+pub use words::Words;
 
 pub struct Query {
     pub text: String,
+}
+
+/// A stage that finds chunks: what a result lists as the reasons it was found, and what a request can turn off.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Signal {
+    Meaning,
+    Words,
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Meaning => "meaning",
+            Self::Words => "words",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     pub chunk_id: i64,
     pub score: f32,
+    /// The stages that found this chunk.
+    pub why: BTreeSet<Signal>,
 }
 
 #[derive(Debug, Error)]
