@@ -8,7 +8,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use trove_core::{
-    data_dir::DataDir,
     embedder::{Embedder, Input, LLAMA_CPP_TAG, ModelEvent, vector_version},
     model_setup::{MODEL_FILE, MODEL_REPO, MODEL_REVISION, MODEL_SHA256, ModelFile, hf_hub_cache},
 };
@@ -24,27 +23,19 @@ const EVENT_WAIT: Duration = Duration::from_secs(120);
 static EMBEDDER: LazyLock<Embedder> =
     LazyLock::new(|| Embedder::new(model_path(), Duration::from_secs(180)));
 
-/// The pinned model where `trove setup` puts it in the data folder, or else in the Hugging Face cache.
+/// The pinned model in the Hugging Face cache.
 fn model_path() -> PathBuf {
-    let model = ModelFile::pinned();
-    let data_dir = DataDir::resolve().expect("data folder");
-    let candidates: Vec<PathBuf> = [
-        Some(model.path_in(&data_dir)),
-        hf_hub_cache().map(|hub| model.path_in_hf_cache(&hub)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let fetch = format!("hf download {MODEL_REPO} {MODEL_FILE} --revision {MODEL_REVISION}");
+    let hub = hf_hub_cache()
+        .unwrap_or_else(|| panic!("no Hugging Face cache folder (no home folder): run `{fetch}`"));
+    let path = ModelFile::pinned().path_in_hf_cache(&hub);
+    assert!(
+        path.is_file(),
+        "model not found at {}: run `{fetch}`",
+        path.display()
+    );
 
-    candidates
-        .iter()
-        .find(|path| path.is_file())
-        .cloned()
-        .unwrap_or_else(|| {
-            panic!(
-                "model not found at {candidates:?}: run `trove setup` or `hf download {MODEL_REPO} {MODEL_FILE} --revision {MODEL_REVISION}`"
-            )
-        })
+    path
 }
 
 fn reference_inputs() -> Vec<(&'static str, Input<'static>)> {
