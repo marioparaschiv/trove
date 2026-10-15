@@ -2,8 +2,9 @@ mod common;
 
 use std::path::Path;
 
-use common::{Serve, indexed, path_str, percent_encode, result_paths};
+use common::{Serve, copy_of, indexed, path_str, percent_encode, result_paths};
 use serde_json::{Value, json};
+use tempfile::TempDir;
 
 /// Notes on coffee, a trip, and three topics unrelated to either.
 const RELATED_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
@@ -26,25 +27,40 @@ const UNRELATED: [&str; 3] = [
     "Taxes/Deductions.md",
 ];
 
-fn serve_related_vault() -> Serve {
-    Serve::start_in(indexed(Path::new(RELATED_VAULT)))
+/// A service over an indexed copy of the related-notes vault.
+struct RelatedVault {
+    serve: Serve,
+    vault: TempDir,
 }
 
-fn related(serve: &Serve, note: &str) -> (u16, Value) {
-    let path = format!(
-        "/related?source={}&path={}",
-        percent_encode(RELATED_VAULT),
-        percent_encode(note)
-    );
+impl RelatedVault {
+    fn start() -> Self {
+        let vault = copy_of(Path::new(RELATED_VAULT));
+        let serve = Serve::start_in(indexed(vault.path()));
 
-    serve.call("GET", &path, None)
+        Self { serve, vault }
+    }
+
+    fn source(&self) -> &str {
+        path_str(self.vault.path())
+    }
+
+    fn related(&self, query: &str) -> (u16, Value) {
+        let path = format!("/related?source={}&{query}", percent_encode(self.source()));
+
+        self.serve.call("GET", &path, None)
+    }
+
+    fn related_to(&self, note: &str) -> (u16, Value) {
+        self.related(&format!("path={}", percent_encode(note)))
+    }
 }
 
 #[test]
 fn linked_and_close_notes_rank_above_unrelated_ones() {
-    let serve = serve_related_vault();
+    let vault = RelatedVault::start();
 
-    let (status, response) = related(&serve, "Coffee/Espresso.md");
+    let (status, response) = vault.related_to("Coffee/Espresso.md");
     assert_eq!(status, 200, "{response}");
     let paths = result_paths(&response);
     let mut top: Vec<&str> = paths.iter().take(2).copied().collect();
@@ -56,19 +72,19 @@ fn linked_and_close_notes_rank_above_unrelated_ones() {
     }
 
     let best = &response["results"][0];
-    assert_eq!(best["source"], path_str(Path::new(RELATED_VAULT)));
+    assert_eq!(best["source"], vault.source());
     assert_eq!(best["score"], 1.0, "{response}");
     assert_eq!(best["why"], json!(["graph"]), "{response}");
 
-    serve.stop();
+    vault.serve.stop();
 }
 
 #[test]
 fn a_note_is_never_in_its_own_list() {
-    let serve = serve_related_vault();
+    let vault = RelatedVault::start();
 
     for note in NOTES {
-        let (status, response) = related(&serve, note);
+        let (status, response) = vault.related_to(note);
         assert_eq!(status, 200, "{note}: {response}");
         assert!(
             !result_paths(&response).contains(&note),
@@ -76,27 +92,21 @@ fn a_note_is_never_in_its_own_list() {
         );
     }
 
-    serve.stop();
+    vault.serve.stop();
 }
 
 #[test]
 fn bad_requests_are_refused() {
-    let serve = serve_related_vault();
+    let vault = RelatedVault::start();
 
-    let (status, response) = related(&serve, "Coffee/Missing.md");
+    let (status, response) = vault.related_to("Coffee/Missing.md");
     assert_eq!(status, 404, "{response}");
-    let (status, response) = serve.call(
-        "GET",
-        &format!(
-            "/related?source={}&path={}&limit=0",
-            percent_encode(RELATED_VAULT),
-            percent_encode(LINKED)
-        ),
-        None,
-    );
+    let (status, response) = vault.related(&format!("path={}&limit=0", percent_encode(LINKED)));
     assert_eq!(status, 400, "{response}");
-    let (status, response) = serve.call("GET", "/related?path=Travel%2FLisbon.md", None);
+    let (status, response) = vault
+        .serve
+        .call("GET", "/related?path=Travel%2FLisbon.md", None);
     assert_eq!(status, 400, "{response}");
 
-    serve.stop();
+    vault.serve.stop();
 }

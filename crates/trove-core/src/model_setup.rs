@@ -9,7 +9,6 @@ use std::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use utoipa::ToSchema;
 use ureq::{
     Agent,
     config::Config as HttpConfig,
@@ -21,6 +20,7 @@ use ureq::{
         },
     },
 };
+use utoipa::ToSchema;
 
 use crate::{config::Config, data_dir::DataDir};
 

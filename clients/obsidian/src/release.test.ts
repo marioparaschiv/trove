@@ -103,12 +103,13 @@ const download = async () => new Uint8Array(readFileSync(release.archive)).buffe
 
 test("installs the pinned release, which then starts", async (t) => {
   const folder = tempDir(t, "trove-bin-");
-  const dataDir = tempDir(t, "trove-data-");
+  const dataDir = mkdtempSync(join(tmpdir(), "trove-data-"));
   t.after(() => {
     const runtime = readRuntimeFile(dataDir);
     if (runtime !== undefined) {
       process.kill(runtime.pid);
     }
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 20 });
   });
 
   const binary = await installBinary({ ...release, folder, platform: process.platform, download });
