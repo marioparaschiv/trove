@@ -5,7 +5,7 @@ use std::{
 
 use tokio::{sync::Notify, time::Instant};
 
-/// Tracks work that keeps the service alive: requests now, and later anything queued.
+/// Tracks work that keeps the service alive: requests, and queued index runs and imports.
 #[derive(Clone)]
 pub(crate) struct Activity(Arc<Inner>);
 

@@ -29,6 +29,7 @@ pub enum Event {
     IndexFinished {
         report: IndexReport,
     },
+    /// An index run, or an import of vector files that arrived, failed.
     IndexFailed {
         message: String,
     },
