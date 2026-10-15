@@ -1,19 +1,19 @@
 {
-  "name": "trove-client",
+  "name": "@trove/client",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
     "generate": "cargo run --quiet --package trove -- openapi > openapi.json && openapi-typescript openapi.json --output src/schema.ts",
     "typecheck": "bun run generate && tsc",
-    "test": "bun run generate && cargo build --quiet --package trove && node --test src/*.test.ts"
+    "lint": "biome check .",
+    "test": "bun run generate && cargo build --quiet --package trove && node --test src/*.test.ts",
+    "build": "bun run typecheck"
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
-    "@types/node": "24",
-    "openapi-typescript": "^7.13.0",
-    "typescript": "5"
+    "openapi-typescript": "^7.13.0"
   }
 }

@@ -26,7 +26,10 @@ const SERVE_LOG = "serve.log";
 const START_TIMEOUT_MS = 30_000;
 
 /** Connects to the running `trove serve`, starting it first when none runs. */
-export async function connect({ binary, dataDir = defaultDataDir() }: ConnectOptions): Promise<Connection> {
+export async function connect({
+  binary,
+  dataDir = defaultDataDir(),
+}: ConnectOptions): Promise<Connection> {
   const found = readRuntimeFile(dataDir);
   const runtime = found && isAlive(found.pid) ? found : await start(binary, dataDir);
 
@@ -63,7 +66,8 @@ export function defaultDataDir(): string {
       return join(homedir(), "Library", "Application Support", "Trove");
     default: {
       const xdg = process.env.XDG_DATA_HOME;
-      const dataHome = xdg !== undefined && isAbsolute(xdg) ? xdg : join(homedir(), ".local", "share");
+      const dataHome =
+        xdg !== undefined && isAbsolute(xdg) ? xdg : join(homedir(), ".local", "share");
 
       return join(dataHome, "trove");
     }
@@ -156,7 +160,12 @@ function start(binary: string, dataDir: string): Promise<RuntimeFile> {
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
-      () => finish(new Error(`trove serve did not start within ${START_TIMEOUT_MS / 1000} s; see ${logPath}`)),
+      () =>
+        finish(
+          new Error(
+            `trove serve did not start within ${START_TIMEOUT_MS / 1000} s; see ${logPath}`,
+          ),
+        ),
       START_TIMEOUT_MS,
     );
 
