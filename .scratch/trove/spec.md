@@ -119,7 +119,7 @@ Trove loads the model only while it's embedding or searching and unloads it when
 - Rust bindings are generated with bindgen from `llama.h` once per tag and committed. libclang is needed only when bumping the tag.
 - The model is `ggml-org/embeddinggemma-2-GGUF` at revision `bfcd298762cc34d0357ece5ebdd31791a3a374d8`, file `embeddinggemma-2-Q8_0.gguf`, 309,855,456 bytes, SHA-256 `2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135`. Never F16 (the model's activations overflow float16).
 - Text only in v1. Mean pooling, L2-normalised, so dot product equals cosine.
-- Prompts: queries use `task: search result | query: {text}`. Documents use `title: {heading path or note title} | text: {chunk}`, to be confirmed against the model card during the first epic.
+- Prompts: queries use `task: search result | query: {text}`. Documents use `title: {heading path or note title} | text: {chunk}`, with `title: none` when there is no title (confirmed against the `google/embeddinggemma-2` model card).
 - Context starts at 2048 tokens. Raising it means raising context, batch and micro-batch together, up to 8192.
 - Embedder interface: load (lazy), embed a batch of texts as queries or documents returning one vector per text in order, unload. Load is triggered by the first call; unload happens after the model idle timeout (default 180 s) or on request.
 - A `vector_version` identifies everything that shapes vectors: model file, llama.cpp tag, prompts, chunker version. It does not include the compute backend.

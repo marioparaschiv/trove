@@ -9,6 +9,11 @@ use crate::index::IndexError;
 /// Splits a note into one chunk per heading section and writes `chunks` and `chunks_fts`.
 pub struct Chunker;
 
+impl Chunker {
+    /// Part of `vector_version`: bump it whenever chunk texts or boundaries change.
+    pub const VERSION: u32 = 1;
+}
+
 struct Section {
     heading_path: String,
     span: Range<usize>,

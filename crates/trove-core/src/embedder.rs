@@ -1,0 +1,221 @@
+use std::{
+    path::PathBuf,
+    sync::{Arc, Condvar, Mutex, MutexGuard, mpsc},
+    thread,
+    time::{Duration, Instant},
+};
+
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+use trove_llama::{EmbeddingModel, LlamaError};
+
+pub use trove_llama::LLAMA_CPP_TAG;
+
+use crate::indexer::Chunker;
+
+/// Tokens per input; context, batch and micro-batch are raised together, up to 8192.
+pub const CONTEXT_TOKENS: u32 = 2048;
+
+const QUERY_PREFIX: &str = "task: search result | query: ";
+const DOCUMENT_TITLE_PREFIX: &str = "title: ";
+const DOCUMENT_TEXT_PREFIX: &str = " | text: ";
+const NO_TITLE: &str = "none";
+
+/// One text to embed, framed with the model card's prompt for its role.
+#[derive(Debug, Clone, Copy)]
+pub enum Input<'a> {
+    Query(&'a str),
+    /// `title` is the chunk's heading path or the note title; empty when there is none.
+    Document {
+        title: &'a str,
+        text: &'a str,
+    },
+}
+
+impl Input<'_> {
+    fn prompt(&self) -> String {
+        match self {
+            Self::Query(text) => format!("{QUERY_PREFIX}{text}"),
+            Self::Document { title, text } => {
+                let title = if title.is_empty() { NO_TITLE } else { title };
+                format!("{DOCUMENT_TITLE_PREFIX}{title}{DOCUMENT_TEXT_PREFIX}{text}")
+            }
+        }
+    }
+}
+
+/// Identifies everything that shapes vectors: the model file (by its SHA-256), the llama.cpp tag, the prompts and the
+/// chunker version. Lowercase hex.
+pub fn vector_version(model_sha256: &str) -> String {
+    let mut hasher = Sha256::new();
+    for part in [
+        model_sha256,
+        LLAMA_CPP_TAG,
+        QUERY_PREFIX,
+        DOCUMENT_TITLE_PREFIX,
+        DOCUMENT_TEXT_PREFIX,
+        NO_TITLE,
+        &Chunker::VERSION.to_string(),
+    ] {
+        hasher.update((part.len() as u64).to_le_bytes());
+        hasher.update(part);
+    }
+
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelEvent {
+    Loaded,
+    Unloaded,
+}
+
+#[derive(Debug, Error)]
+#[error("embedding model failed")]
+pub struct EmbedderError(#[from] LlamaError);
+
+/// The embedding model, loaded by the first call that needs it and unloaded after `idle_timeout` without calls or on
+/// request.
+pub struct Embedder {
+    shared: Arc<Shared>,
+}
+
+struct Shared {
+    model_path: PathBuf,
+    idle_timeout: Duration,
+    state: Mutex<State>,
+    state_changed: Condvar,
+    listeners: Mutex<Vec<mpsc::Sender<ModelEvent>>>,
+}
+
+struct State {
+    model: Option<EmbeddingModel>,
+    last_used: Instant,
+    // Tells an idle watcher whether the model it was started for is still the loaded one.
+    generation: u64,
+}
+
+impl Embedder {
+    pub fn new(model_path: PathBuf, idle_timeout: Duration) -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                model_path,
+                idle_timeout,
+                state: Mutex::new(State {
+                    model: None,
+                    last_used: Instant::now(),
+                    generation: 0,
+                }),
+                state_changed: Condvar::new(),
+                listeners: Mutex::new(Vec::new()),
+            }),
+        }
+    }
+
+    /// Loads the model now (prewarm) and restarts the idle timeout.
+    pub fn load(&self) -> Result<(), EmbedderError> {
+        drop(self.shared.loaded_state()?);
+        Ok(())
+    }
+
+    /// One unit-length vector per input, in order.
+    pub fn embed(&self, inputs: &[Input<'_>]) -> Result<Vec<Vec<f32>>, EmbedderError> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let prompts: Vec<String> = inputs.iter().map(Input::prompt).collect();
+        let texts: Vec<&str> = prompts.iter().map(String::as_str).collect();
+
+        let mut state = self.shared.loaded_state()?;
+        let model = state
+            .model
+            .as_mut()
+            .expect("loaded_state returns a loaded model");
+        let vectors = model.embed(&texts)?;
+        state.last_used = Instant::now();
+
+        Ok(vectors)
+    }
+
+    pub fn unload(&self) {
+        let mut state = self.shared.lock_state();
+        if state.model.take().is_some() {
+            self.shared.state_changed.notify_all();
+            self.shared.notify(ModelEvent::Unloaded);
+        }
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.shared.lock_state().model.is_some()
+    }
+
+    /// Receives every later load and unload.
+    pub fn subscribe(&self) -> mpsc::Receiver<ModelEvent> {
+        let (sender, receiver) = mpsc::channel();
+        self.shared.lock_listeners().push(sender);
+        receiver
+    }
+}
+
+impl Drop for Embedder {
+    fn drop(&mut self) {
+        self.unload();
+    }
+}
+
+impl Shared {
+    fn loaded_state(self: &Arc<Self>) -> Result<MutexGuard<'_, State>, LlamaError> {
+        let mut state = self.lock_state();
+        state.last_used = Instant::now();
+        if state.model.is_some() {
+            return Ok(state);
+        }
+
+        state.model = Some(EmbeddingModel::load(&self.model_path, CONTEXT_TOKENS)?);
+        state.generation += 1;
+        let generation = state.generation;
+        let shared = Arc::clone(self);
+        thread::spawn(move || shared.unload_when_idle(generation));
+        self.notify(ModelEvent::Loaded);
+
+        Ok(state)
+    }
+
+    fn unload_when_idle(&self, generation: u64) {
+        let mut state = self.lock_state();
+        while state.model.is_some() && state.generation == generation {
+            let idle = state.last_used.elapsed();
+            if idle >= self.idle_timeout {
+                state.model = None;
+                self.notify(ModelEvent::Unloaded);
+                return;
+            }
+
+            state = self
+                .state_changed
+                .wait_timeout(state, self.idle_timeout - idle)
+                .expect("embedder state lock poisoned")
+                .0;
+        }
+    }
+
+    fn notify(&self, event: ModelEvent) {
+        self.lock_listeners()
+            .retain(|listener| listener.send(event).is_ok());
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().expect("embedder state lock poisoned")
+    }
+
+    fn lock_listeners(&self) -> MutexGuard<'_, Vec<mpsc::Sender<ModelEvent>>> {
+        self.listeners
+            .lock()
+            .expect("embedder listeners lock poisoned")
+    }
+}
