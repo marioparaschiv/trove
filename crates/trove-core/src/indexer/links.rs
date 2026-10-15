@@ -42,7 +42,9 @@ impl FileProcessor for LinkParser {
         while let Some(row) = rows.next()? {
             let value: String = row.get(1)?;
             if row.get(0)? {
-                properties.tags.extend(tag(value.trim().trim_start_matches('#')));
+                properties
+                    .tags
+                    .extend(tag(value.trim().trim_start_matches('#')));
             } else {
                 scan(&value, &mut properties);
             }
@@ -53,7 +55,11 @@ impl FileProcessor for LinkParser {
         )?;
         let edges = [
             (body.links, EdgeKind::Link, LINK_WEIGHT),
-            (properties.links, EdgeKind::PropertyLink, PROPERTY_LINK_WEIGHT),
+            (
+                properties.links,
+                EdgeKind::PropertyLink,
+                PROPERTY_LINK_WEIGHT,
+            ),
         ];
         for (targets, kind, weight) in edges {
             for target in targets {
@@ -78,10 +84,7 @@ struct Found {
 
 /// `line` with each inline code span replaced by a space.
 fn without_code_spans(line: &str) -> String {
-    line.split('`')
-        .step_by(2)
-        .collect::<Vec<_>>()
-        .join(" ")
+    line.split('`').step_by(2).collect::<Vec<_>>().join(" ")
 }
 
 /// Collects the links and tags in one line of text.
@@ -94,7 +97,10 @@ fn scan(text: &str, found: &mut Found) {
         } else if let Some(inner) = rest.strip_prefix('[') {
             markdown_link(inner, found)
         } else if let Some(inner) = rest.strip_prefix('#')
-            && text[..at].chars().next_back().is_none_or(char::is_whitespace)
+            && text[..at]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace)
         {
             body_tag(inner, found)
         } else {
@@ -130,7 +136,10 @@ fn markdown_link(inner: &str, found: &mut Found) -> Option<usize> {
         }
         None => {
             let end = destination.find(')')?;
-            let target = destination[..end].split_whitespace().next().unwrap_or_default();
+            let target = destination[..end]
+                .split_whitespace()
+                .next()
+                .unwrap_or_default();
             (target, end + 1)
         }
     };

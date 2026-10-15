@@ -70,8 +70,8 @@ impl Stage for GraphRerank<'_> {
                 }
                 None => 0.0,
             };
-            candidate.score = (1.0 - GRAPH_SHARE) * candidate.score / best_score
-                + GRAPH_SHARE * rank / best_rank;
+            candidate.score =
+                (1.0 - GRAPH_SHARE) * candidate.score / best_score + GRAPH_SHARE * rank / best_rank;
         }
 
         for (node, &rank) in ranks.iter().enumerate() {

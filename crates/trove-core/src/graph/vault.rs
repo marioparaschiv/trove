@@ -81,9 +81,7 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     fn add_notes(&mut self) -> rusqlite::Result<()> {
-        let mut statement = self
-            .conn
-            .prepare("SELECT id, source_id, path FROM files")?;
+        let mut statement = self.conn.prepare("SELECT id, source_id, path FROM files")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             let (file_id, source_id, path): (i64, i64, String) =
@@ -192,9 +190,12 @@ impl Builder<'_> {
         match key {
             NodeKey::Note(file_id) => self.notes.get(file_id).map(|note| note.node),
             NodeKey::Section { .. } => self.nodes.get(key).copied(),
-            NodeKey::Tag(_) => Some(*self.nodes.entry(key.clone()).or_insert_with(|| {
-                self.graph.add_node()
-            })),
+            NodeKey::Tag(_) => Some(
+                *self
+                    .nodes
+                    .entry(key.clone())
+                    .or_insert_with(|| self.graph.add_node()),
+            ),
             NodeKey::Link(_) => None,
         }
     }

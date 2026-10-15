@@ -1,0 +1,17 @@
+{
+  "name": "@trove/obsidian",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc",
+    "lint": "biome check .",
+    "test": "node --test src/*.test.ts",
+    "build": "tsc && bun build src/main.ts --outfile main.js --target node --format cjs --external obsidian --external electron"
+  },
+  "dependencies": {
+    "@trove/client": "workspace:*"
+  },
+  "devDependencies": {
+    "obsidian": "^1.14.4"
+  }
+}

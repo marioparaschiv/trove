@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{
-    Candidate, CollapseToNotes, GraphRerank, Meaning, Pipeline, Query, SearchError, Signal, Stage,
+    Candidate, CollapseToNotes, Fusion, GraphRerank, Meaning, Pipeline, Query, SearchError, Signal,
+    Stage, Words,
 };
 use crate::{
     embedder::Embedder,
@@ -69,6 +70,10 @@ pub fn search(
     if !request.skip.contains(&Signal::Meaning) {
         stages.push(Box::new(Meaning::new(index, embedder)));
     }
+    if !request.skip.contains(&Signal::Words) {
+        stages.push(Box::new(Words::new(index)));
+    }
+    stages.push(Box::new(Fusion));
     if !request.skip.contains(&Signal::Graph) {
         stages.push(Box::new(GraphRerank::new(index)));
     }

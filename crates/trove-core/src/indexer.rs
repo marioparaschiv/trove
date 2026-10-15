@@ -16,8 +16,8 @@ use crate::{
 };
 
 pub use chunker::Chunker;
-pub use links::LinkParser;
 pub(crate) use chunker::document_title;
+pub use links::LinkParser;
 pub use scan::{IndexProblem, IndexReport, index_sources};
 
 #[derive(Debug, Error)]

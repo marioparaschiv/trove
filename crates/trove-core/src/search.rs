@@ -1,9 +1,11 @@
 mod collapse;
+mod fusion;
 mod graph;
 mod meaning;
 mod request;
+mod words;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,9 +14,11 @@ use utoipa::ToSchema;
 use crate::embedder::EmbedderError;
 
 pub use collapse::CollapseToNotes;
+pub use fusion::Fusion;
 pub use graph::GraphRerank;
 pub use meaning::Meaning;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
+pub use words::Words;
 
 pub struct Query {
     pub text: String,
@@ -27,7 +31,18 @@ pub struct Query {
 #[serde(rename_all = "lowercase")]
 pub enum Signal {
     Meaning,
+    Words,
     Graph,
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Meaning => "meaning",
+            Self::Words => "words",
+            Self::Graph => "graph",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
