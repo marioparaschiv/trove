@@ -96,7 +96,15 @@ async function fixtureSetup(t: TestContext): Promise<string> {
   const env = { HF_ENDPOINT: process.env.HF_ENDPOINT, HF_HUB_CACHE: process.env.HF_HUB_CACHE };
   process.env.HF_ENDPOINT = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   process.env.HF_HUB_CACHE = hfCache;
-  t.after(() => Object.assign(process.env, env));
+  t.after(() => {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
 
   return dataDir;
 }
