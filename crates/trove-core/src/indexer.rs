@@ -1,6 +1,8 @@
 mod chunker;
 mod embed;
 mod frontmatter;
+mod links;
+mod neighbours;
 mod scan;
 
 use std::sync::Arc;
@@ -16,6 +18,7 @@ use crate::{
 pub use chunker::Chunker;
 pub(crate) use chunker::document_title;
 pub use embed::EmbedProgress;
+pub use links::LinkParser;
 pub use scan::{IndexMode, IndexProblem, IndexReport, index_sources};
 
 #[derive(Debug, Error)]
@@ -56,7 +59,7 @@ impl Indexer {
 
     /// Every processor a note goes through.
     pub fn standard(embedder: Arc<Embedder>) -> Self {
-        Self::new(vec![Box::new(Chunker::new(embedder))])
+        Self::new(vec![Box::new(Chunker::new(embedder)), Box::new(LinkParser)])
     }
 
     pub fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexerError> {

@@ -8,4 +8,4 @@ Double the wait after each failed attempt: 100 ms, 200 ms, 400 ms and so on, up 
 
 ## Jitter
 
-Add randomness to each delay so that thousands of clients that failed together do not all come back at the same moment and knock the service over again.
+Add randomness to each delay so that thousands of clients that failed together do not all come back at the same moment and knock the service over again. ^spread

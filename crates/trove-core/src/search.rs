@@ -1,5 +1,6 @@
 mod collapse;
 mod fusion;
+mod graph;
 mod meaning;
 mod request;
 mod words;
@@ -14,6 +15,7 @@ use crate::embedder::EmbedderError;
 
 pub use collapse::CollapseToNotes;
 pub use fusion::Fusion;
+pub use graph::GraphRerank;
 pub use meaning::Meaning;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
 pub use words::Words;
@@ -30,6 +32,7 @@ pub struct Query {
 pub enum Signal {
     Meaning,
     Words,
+    Graph,
 }
 
 impl fmt::Display for Signal {
@@ -37,6 +40,7 @@ impl fmt::Display for Signal {
         f.write_str(match self {
             Self::Meaning => "meaning",
             Self::Words => "words",
+            Self::Graph => "graph",
         })
     }
 }

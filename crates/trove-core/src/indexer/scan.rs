@@ -14,6 +14,7 @@ use super::{
     Indexer, IndexerError, NoteFile,
     embed::{EmbedProgress, embed_missing},
     frontmatter::properties,
+    neighbours::update_graph_edges,
 };
 use crate::{
     config::Config,
@@ -116,6 +117,7 @@ pub fn index_sources(
         [],
     )?;
     report.embedded = embed_missing(index, embedder, progress)?;
+    update_graph_edges(index)?;
 
     Ok(report)
 }
