@@ -1,50 +1,51 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { Schemas } from "@trove/client";
+import { isRecord, type Schemas } from "@trove/client";
 
 export type SetupEvent = Schemas["SetupEvent"];
 
 /** Reads one line of `trove setup --json`. */
 export function parseSetupEvent(line: string): SetupEvent {
-  const value: unknown = JSON.parse(line);
-  if (typeof value !== "object" || value === null || !("event" in value)) {
+  const event = toSetupEvent(JSON.parse(line));
+  if (event === undefined) {
     throw new Error(`unexpected setup output ${line}`);
   }
 
-  const event = value as Record<string, unknown>;
-  const valid = (() => {
-    switch (event.event) {
-      case "file":
-        return (
-          typeof event.name === "string" &&
-          typeof event.bytes === "number" &&
-          (event.from === "cache" || event.from === "download")
-        );
-      case "progress":
-        return (
-          typeof event.name === "string" &&
-          typeof event.bytes === "number" &&
-          typeof event.total === "number"
-        );
-      case "waiting":
-        return true;
-      case "verifying":
-        return typeof event.name === "string";
-      case "retry":
-        return typeof event.message === "string" && typeof event.seconds === "number";
-      case "done":
-        return typeof event.path === "string";
-      case "error":
-        return typeof event.message === "string";
-      default:
-        return false;
-    }
-  })();
-  if (!valid) {
-    throw new Error(`unexpected setup output ${line}`);
+  return event;
+}
+
+function toSetupEvent(value: unknown): SetupEvent | undefined {
+  if (!isRecord(value)) {
+    return undefined;
   }
 
-  return value as SetupEvent;
+  const { event, name, bytes, from, total, message, seconds, path } = value;
+  switch (event) {
+    case "file":
+      return typeof name === "string" &&
+        typeof bytes === "number" &&
+        (from === "cache" || from === "download")
+        ? { event, name, bytes, from }
+        : undefined;
+    case "progress":
+      return typeof name === "string" && typeof bytes === "number" && typeof total === "number"
+        ? { event, name, bytes, total }
+        : undefined;
+    case "waiting":
+      return { event };
+    case "verifying":
+      return typeof name === "string" ? { event, name } : undefined;
+    case "retry":
+      return typeof message === "string" && typeof seconds === "number"
+        ? { event, message, seconds }
+        : undefined;
+    case "done":
+      return typeof path === "string" ? { event, path } : undefined;
+    case "error":
+      return typeof message === "string" ? { event, message } : undefined;
+    default:
+      return undefined;
+  }
 }
 
 /** What a setup event tells the user. */

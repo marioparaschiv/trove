@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { isRecord } from "@trove/client";
 
 /** The platforms releases are built for, by Node's platform and architecture. */
 const PLATFORMS = {
@@ -54,18 +55,17 @@ export function parseReleasePin(text: string | undefined): ReleasePin | undefine
     throw new Error(`invalid release pin ${text}`);
   }
 
-  const platforms: string[] = Object.values(PLATFORMS);
-  for (const [platform, asset] of Object.entries(assets)) {
-    if (!platforms.includes(platform) || !isAsset(asset)) {
-      throw new Error(`invalid release pin asset ${platform}: ${JSON.stringify(asset)}`);
+  const pinned: ReleasePin["assets"] = {};
+  for (const [name, asset] of Object.entries(assets)) {
+    const platform = Object.values(PLATFORMS).find((known) => known === name);
+    if (platform === undefined || !isAsset(asset)) {
+      throw new Error(`invalid release pin asset ${name}: ${JSON.stringify(asset)}`);
     }
+
+    pinned[platform] = asset;
   }
 
-  return { version, repository, assets: assets as ReleasePin["assets"] };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return { version, repository, assets: pinned };
 }
 
 function isAsset(value: unknown): value is ReleaseAsset {

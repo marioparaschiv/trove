@@ -111,12 +111,16 @@ export function readRuntimeFile(dataDir: string): RuntimeFile | undefined {
   return value;
 }
 
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isRuntimeFile(value: unknown): value is RuntimeFile {
-  if (typeof value !== "object" || value === null) {
+  if (!isRecord(value)) {
     return false;
   }
 
-  const { port, token, pid, version, ...rest } = value as Record<string, unknown>;
+  const { port, token, pid, version, ...rest } = value;
 
   return (
     Object.keys(rest).length === 0 &&
