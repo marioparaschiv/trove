@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -172,7 +172,13 @@ impl Embedder {
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.shared.lock_state().model.is_some()
+        match self.shared.state.try_lock() {
+            Ok(state) => state.model.is_some(),
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().model.is_some(),
+            // Held for a load or an embed batch, either of which ends with the model loaded; waiting would hold up
+            // `/status` for a whole batch.
+            Err(TryLockError::WouldBlock) => true,
+        }
     }
 
     /// Receives every later load and unload.
