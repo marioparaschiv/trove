@@ -75,6 +75,10 @@ test("edits that don't move a note into a category note pin nothing", () => {
     editPins(BREAD, state(undefined, KITCHEN), state(BREAD, KITCHEN), vault(), FOLDER),
     [],
   );
+  assert.deepEqual(
+    editPins(BREAD, state(undefined, KITCHEN), state(undefined, "Unsorted.md"), vault(), FOLDER),
+    [],
+  );
 });
 
 test("changing a category note's parent pins the category under its new parent", () => {

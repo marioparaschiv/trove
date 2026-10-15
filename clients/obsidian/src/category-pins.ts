@@ -59,11 +59,11 @@ export function editPins(
   folder: string,
 ): CategoryPin[] {
   if (inFolder(path, folder)) {
-    if (before?.parent === after.parent) {
+    const parent = after.parent;
+    if (parent === before?.parent || (parent !== undefined && !inFolder(parent, folder))) {
       return [];
     }
 
-    const parent = after.parent;
     const pins = [categoryPin(path, states, folder)];
     if (parent !== undefined) {
       pins.push(categoryPin(parent, states, folder));
