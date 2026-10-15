@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.97.1
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+          - name: macOS arm64
+            os: macos-15
+          - name: Linux
+            os: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy
+          rustup default "$RUST_TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@v2.9.2
+
+      # build.rs fetches and builds llama.cpp inside each build script's OUT_DIR (clippy and test get one each).
+      # Cargo only reruns cmake there, which finds the restored build up to date.
+      - name: Cache llama.cpp build
+        uses: actions/cache@v6.1.0
+        with:
+          path: target/debug/build/trove-llama-*/out
+          key: llama-cpp-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', 'crates/trove-llama/build.rs', 'crates/trove-llama/*.patch') }}
+
+      - name: Read the model pin
+        id: model
+        run: |
+          pin() {
+            local value
+            value=$(sed -n "s/^pub const $1: &str = \"\(.*\)\";$/\1/p" crates/trove-core/src/model_setup.rs)
+            if [ -z "$value" ]; then
+              echo "::error::$1 not found in crates/trove-core/src/model_setup.rs"
+              exit 1
+            fi
+            echo "$value"
+          }
+          repo=$(pin MODEL_REPO)
+          revision=$(pin MODEL_REVISION)
+          file=$(pin MODEL_FILE)
+          sha256=$(pin MODEL_SHA256)
+          {
+            echo "repo=$repo"
+            echo "revision=$revision"
+            echo "file=$file"
+            echo "sha256=$sha256"
+            echo "hf-folder=models--${repo//\//--}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache model
+        id: model-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/huggingface/hub/${{ steps.model.outputs.hf-folder }}
+          key: model-${{ runner.os }}-${{ steps.model.outputs.revision }}-${{ steps.model.outputs.file }}
+
+      # Same layout as `hf download`, which the embedder tests read.
+      - name: Download model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        env:
+          REPO: ${{ steps.model.outputs.repo }}
+          REVISION: ${{ steps.model.outputs.revision }}
+          FILE: ${{ steps.model.outputs.file }}
+          SHA256: ${{ steps.model.outputs.sha256 }}
+          FOLDER: ${{ steps.model.outputs.hf-folder }}
+        run: |
+          snapshot="$HOME/.cache/huggingface/hub/$FOLDER/snapshots/$REVISION"
+          mkdir -p "$snapshot"
+          curl --fail --location --retry 5 --output "$snapshot/$FILE.partial" \
+            "https://huggingface.co/$REPO/resolve/$REVISION/$FILE"
+          echo "$SHA256  $snapshot/$FILE.partial" | shasum --algorithm 256 --check
+          mv "$snapshot/$FILE.partial" "$snapshot/$FILE"
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- --deny warnings
+
+      - name: Test
+        run: cargo test --locked
