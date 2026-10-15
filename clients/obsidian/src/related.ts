@@ -1,7 +1,8 @@
 import { failure } from "@trove/client";
 import { Keymap, MarkdownView, Notice, type Plugin } from "obsidian";
 import { connectTo, message, noteLink, vaultSource } from "./connection.ts";
-import { inVault, type TroveResult } from "./suggestions.ts";
+import type { TroveResult } from "./suggestions.ts";
+import { inVault } from "./vault-paths.ts";
 
 interface Section {
   el: HTMLElement;

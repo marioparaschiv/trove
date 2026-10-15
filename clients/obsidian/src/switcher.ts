@@ -12,13 +12,8 @@ import {
 } from "obsidian";
 import { connectTo, message, noteLink, vaultSource } from "./connection.ts";
 import { linkPath } from "./links.ts";
-import {
-  type FileSuggestion,
-  inVault,
-  merge,
-  type Suggestion,
-  type TroveResult,
-} from "./suggestions.ts";
+import { type FileSuggestion, merge, type Suggestion, type TroveResult } from "./suggestions.ts";
+import { inVault } from "./vault-paths.ts";
 
 const SEARCH_DELAY_MS = 150;
 

@@ -1,7 +1,8 @@
 import { connect, failure, type TroveClient } from "@trove/client";
 import { stripHeadingForLink } from "obsidian";
 import { obsidianFetch } from "./obsidian-fetch.ts";
-import { isSameFolder, type TroveResult } from "./suggestions.ts";
+import type { TroveResult } from "./suggestions.ts";
+import { isSameFolder } from "./vault-paths.ts";
 
 /** Connects to Trove, starting it when it isn't running. */
 export async function connectTo(binary: string): Promise<TroveClient> {

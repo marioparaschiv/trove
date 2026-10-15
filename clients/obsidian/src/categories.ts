@@ -11,7 +11,7 @@ import {
 } from "./category-notes.ts";
 import { connectTo, message, vaultSource } from "./connection.ts";
 import type TrovePlugin from "./main.ts";
-import { isSameFolder } from "./suggestions.ts";
+import { isSameFolder } from "./vault-paths.ts";
 
 /** The "Preview categories" and "Apply categories" commands. */
 export class CategoryCommands {
