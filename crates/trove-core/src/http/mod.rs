@@ -1,6 +1,7 @@
 //! `trove serve`: the HTTP API on localhost that clients call.
 
 mod activity;
+mod categories;
 mod error;
 mod events;
 mod guard;
@@ -93,6 +94,7 @@ fn router() -> OpenApiRouter<Arc<AppState>> {
         .routes(routes!(model::unload))
         .routes(routes!(sources::list, sources::add, sources::remove))
         .routes(routes!(indexing::index))
+        .routes(routes!(categories::categories))
 }
 
 /// A started service: it holds the lock, listens, and has written the runtime file.

@@ -37,6 +37,11 @@ impl Graph {
         self.neighbours[b].push((a, weight));
     }
 
+    /// The edges of `node`, with the node at their other end.
+    pub fn edges(&self, node: usize) -> &[(usize, f32)] {
+        &self.neighbours[node]
+    }
+
     /// Personalised PageRank: how often a walk that follows edges by weight, and jumps back to the seeds with
     /// probability [`RESTART`], visits each node. Seeds are chosen in proportion to their weights; a walk at a node with
     /// no edges jumps back to them too. All zero when the seeds weigh nothing.
