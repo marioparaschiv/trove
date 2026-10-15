@@ -8,6 +8,7 @@ const retryBackoff: TroveResult = {
   title: "Retry backoff",
   heading_path: ["Retry backoff", "Jitter"],
   score: 3.4,
+  why: ["meaning"],
 };
 
 const kyoto: TroveResult = {
@@ -16,6 +17,7 @@ const kyoto: TroveResult = {
   title: "Kyoto",
   heading_path: ["Kyoto"],
   score: 2.9,
+  why: ["meaning", "words"],
 };
 
 test("keeps only results from the vault's folder", () => {
