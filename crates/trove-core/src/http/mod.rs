@@ -4,8 +4,12 @@ mod activity;
 mod error;
 mod events;
 mod guard;
+mod indexing;
+mod model;
 mod openapi;
 mod runtime;
+mod search;
+mod sources;
 mod status;
 
 use std::{
@@ -23,13 +27,16 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 pub use error::ErrorBody;
 pub use events::Event;
+pub use model::ModelStatus;
 pub use openapi::openapi;
 pub use runtime::{RuntimeError, RuntimeFile};
+pub use sources::SourcePath;
 pub use status::Status;
 
 use crate::{
     config::Config,
     data_dir::DataDir,
+    embedder::Embedder,
     index::{Index, IndexError},
 };
 use activity::Activity;
@@ -60,7 +67,9 @@ pub enum ServeError {
 pub(crate) struct AppState {
     runtime: RuntimeFile,
     allowed_hosts: [String; 2],
+    config: Config,
     index: Arc<Mutex<Index>>,
+    embedder: Arc<Embedder>,
     events: broadcast::Sender<Event>,
     activity: Activity,
     shutdown: CancellationToken,
@@ -70,6 +79,11 @@ fn router() -> OpenApiRouter<Arc<AppState>> {
     OpenApiRouter::with_openapi(openapi::ApiDoc::openapi())
         .routes(routes!(status::status))
         .routes(routes!(events::events))
+        .routes(routes!(search::search))
+        .routes(routes!(model::prewarm))
+        .routes(routes!(model::unload))
+        .routes(routes!(sources::list, sources::add, sources::remove))
+        .routes(routes!(indexing::index))
 }
 
 /// A started service: it holds the lock, listens, and has written the runtime file.
@@ -102,6 +116,8 @@ impl Service {
             allowed_hosts: [format!("127.0.0.1:{port}"), format!("localhost:{port}")],
             runtime,
             index: Arc::new(Mutex::new(index)),
+            embedder: Arc::new(Embedder::from_config(data_dir, config)),
+            config: config.clone(),
             events: broadcast::channel(EVENT_BUFFER).0,
             activity: Activity::new(),
             shutdown: CancellationToken::new(),

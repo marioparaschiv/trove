@@ -7,7 +7,7 @@ use crate::service::Service;
 pub struct Args {}
 
 pub fn run(ctx: &Context, _args: Args) -> anyhow::Result<()> {
-    let stats = match Service::connect(&ctx.data_dir)? {
+    let (stats, loaded) = match Service::connect(&ctx.data_dir)? {
         Some(service) => {
             let status: Status = service.get("/status")?;
             println!(
@@ -16,16 +16,18 @@ pub fn run(ctx: &Context, _args: Args) -> anyhow::Result<()> {
                 service.runtime().port
             );
 
-            status.index
+            (status.index, status.model.loaded)
         }
         None => {
             println!("service: not running");
 
-            Index::open(&ctx.data_dir)?.stats()?
+            // Only a service keeps the model loaded.
+            (Index::open(&ctx.data_dir)?.stats()?, false)
         }
     };
 
     println!("index: {} files, {} chunks", stats.files, stats.chunks);
+    println!("model: {}", if loaded { "loaded" } else { "not loaded" });
 
     Ok(())
 }
