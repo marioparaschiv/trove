@@ -321,7 +321,8 @@ fn init_backend() -> Result<(), LlamaError> {
     }
 }
 
-/// llama.cpp logs a lot while loading; only warnings and errors are kept, on stderr.
+/// llama.cpp logs a lot while loading, and warns about quirks of the pinned model's vocabulary on every load; only
+/// errors are kept, on stderr.
 unsafe extern "C" fn log(level: ggml_log_level, text: *const c_char, _: *mut c_void) {
     // A continuation line belongs to the previous message and takes its level.
     // The enum's integer type differs between compilers, hence i64.
@@ -333,7 +334,7 @@ unsafe extern "C" fn log(level: ggml_log_level, text: *const c_char, _: *mut c_v
         i64::from(level)
     };
 
-    if level >= i64::from(GGML_LOG_LEVEL_WARN) && !text.is_null() {
+    if level >= i64::from(GGML_LOG_LEVEL_ERROR) && !text.is_null() {
         // SAFETY: llama.cpp passes a NUL-terminated message.
         eprint!("{}", unsafe { CStr::from_ptr(text) }.to_string_lossy());
     }
