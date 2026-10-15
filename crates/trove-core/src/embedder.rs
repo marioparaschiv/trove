@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, MutexGuard, mpsc},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -224,7 +224,7 @@ impl Shared {
             state = self
                 .state_changed
                 .wait_timeout(state, self.idle_timeout - idle)
-                .expect("embedder state lock poisoned")
+                .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }
     }
@@ -234,13 +234,14 @@ impl Shared {
             .retain(|listener| listener.send(event).is_ok());
     }
 
+    // A panic while embedding leaves the state whole: the model is either there or not.
     fn lock_state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().expect("embedder state lock poisoned")
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn lock_listeners(&self) -> MutexGuard<'_, Vec<mpsc::Sender<ModelEvent>>> {
         self.listeners
             .lock()
-            .expect("embedder listeners lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
