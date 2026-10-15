@@ -1,5 +1,6 @@
 mod eval;
 mod index;
+mod openapi;
 mod search;
 mod serve;
 mod setup;
@@ -34,6 +35,9 @@ pub enum Command {
     Unload(unload::Args),
     /// Score search against a queries file
     Eval(eval::Args),
+    /// Print the HTTP API's OpenAPI spec, which the TypeScript client is generated from
+    #[command(hide = true)]
+    Openapi(openapi::Args),
 }
 
 impl Command {
@@ -47,6 +51,7 @@ impl Command {
             Self::Search(args) => search::run(ctx, args),
             Self::Unload(args) => unload::run(ctx, args),
             Self::Eval(args) => eval::run(ctx, args),
+            Self::Openapi(args) => openapi::run(ctx, args),
         }
     }
 }

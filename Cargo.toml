@@ -12,10 +12,13 @@ publish = false
 trove-core = { path = "crates/trove-core" }
 trove-llama = { path = "crates/trove-llama" }
 anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 bindgen = "0.72.1"
 clap = { version = "4.6.7", features = ["derive"] }
 cmake = "0.1.58"
 directories = "6.0.0"
+futures-util = { version = "0.3.34", default-features = false }
+getrandom = "0.4.3"
 hex = "0.4.3"
 humantime = "2.4.0"
 rusqlite = { version = "0.40.2", features = ["bundled", "fallible_uint"] }
@@ -24,9 +27,13 @@ serde_json = "1.0.154"
 sha2 = "0.11.1"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7.20"
 toml = "1.1.8"
 # ureq changes its `unversioned` transport API (used for the download idle timeout) only in minor releases.
 ureq = { version = "~3.4.2", default-features = false, features = ["rustls"] }
+utoipa = "6.0.0"
+utoipa-axum = "0.3.0"
 uuid = { version = "1.28.0", features = ["v4"] }
 
 [workspace.lints.rust]
