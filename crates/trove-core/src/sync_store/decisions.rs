@@ -29,6 +29,28 @@ pub enum SuggestionState {
     Dismissed,
 }
 
+/// A manual category edit, which later runs keep. Categories are named, and notes given by their paths in the source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CategoryPin {
+    /// A category the user named or kept. Later runs find it by its notes (subcategories included): it takes every
+    /// category most of whose notes, and most of each of whose subcategories' notes, are among them. A rename or a
+    /// merge lists the names it replaces, and pins naming those then mean this one.
+    Category {
+        name: String,
+        notes: Vec<String>,
+        #[serde(default)]
+        replaces: Vec<String>,
+    },
+    /// The category is a subcategory of `parent`, a pinned category, or at the top level when `parent` is null.
+    Parent {
+        category: String,
+        parent: Option<String>,
+    },
+    /// The note is in the category, a pinned one, and in none of its subcategories.
+    Note { path: String, category: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Decision {
@@ -36,6 +58,9 @@ pub enum Decision {
     Suggestion {
         notes: [String; 2],
         state: SuggestionState,
+    },
+    CategoryPin {
+        pin: CategoryPin,
     },
 }
 
@@ -73,6 +98,15 @@ pub enum DecisionError {
 impl SyncStore {
     /// Appends a decision made now on the device `device_id`.
     pub fn record_decision(&self, device_id: &str, decision: Decision) -> Result<(), StoreError> {
+        self.record_decisions(device_id, [decision])
+    }
+
+    /// Appends decisions made now on the device `device_id`, in order, so a later one wins over an earlier one.
+    pub fn record_decisions(
+        &self,
+        device_id: &str,
+        decisions: impl IntoIterator<Item = Decision>,
+    ) -> Result<(), StoreError> {
         let path = self
             .root
             .join(DECISIONS_FOLDER)
@@ -86,12 +120,15 @@ impl SyncStore {
             bytes.push(b'\n');
         }
 
-        let record = Record {
-            at: humantime::format_rfc3339_nanos(SystemTime::now()).to_string(),
-            decision,
-        };
-        serde_json::to_writer(&mut bytes, &record).expect("a decision always serialises");
-        bytes.push(b'\n');
+        let at = humantime::format_rfc3339_nanos(SystemTime::now()).to_string();
+        for decision in decisions {
+            let record = Record {
+                at: at.clone(),
+                decision,
+            };
+            serde_json::to_writer(&mut bytes, &record).expect("a decision always serialises");
+            bytes.push(b'\n');
+        }
 
         // The whole file is rewritten rather than appended to, so a sync tool never picks up half a line.
         write_atomically(&path, &bytes)
@@ -99,7 +136,36 @@ impl SyncStore {
 
     /// The latest state of every suggestion any device decided about, by its pair of notes.
     pub fn suggestion_states(&self) -> Result<HashMap<[String; 2], SuggestionState>, StoreError> {
-        let mut latest: HashMap<[String; 2], (Order, SuggestionState)> = HashMap::new();
+        let mut latest = HashMap::new();
+        for decision in self.decisions()? {
+            if let Decision::Suggestion {
+                notes: [a, b],
+                state,
+            } = decision
+            {
+                latest.insert(note_pair(&a, &b), state);
+            }
+        }
+
+        Ok(latest)
+    }
+
+    /// Every device's category pins, oldest first. A pin overrides what earlier ones said about the same category or
+    /// note, so the latest wins.
+    pub fn category_pins(&self) -> Result<Vec<CategoryPin>, StoreError> {
+        Ok(self
+            .decisions()?
+            .into_iter()
+            .filter_map(|decision| match decision {
+                Decision::CategoryPin { pin } => Some(pin),
+                Decision::Suggestion { .. } => None,
+            })
+            .collect())
+    }
+
+    /// Every device's decisions, oldest first.
+    fn decisions(&self) -> Result<Vec<Decision>, StoreError> {
+        let mut decisions: Vec<(Order, Decision)> = Vec::new();
         for (device, path) in self.decision_files()? {
             let text = fs::read_to_string(&path).map_err(|source| StoreError::Read {
                 path: path.clone(),
@@ -120,25 +186,19 @@ impl SyncStore {
                 let at = humantime::parse_rfc3339(&record.at)
                     .map_err(|error| malformed(DecisionError::Time(error)))?;
 
-                let Decision::Suggestion { notes, state } = record.decision;
                 let order = Order {
                     at,
                     device: device.clone(),
                     line,
                 };
-                let [a, b] = notes;
-                let entry = latest
-                    .entry(note_pair(&a, &b))
-                    .or_insert((order.clone(), state));
-                if order >= entry.0 {
-                    *entry = (order, state);
-                }
+                decisions.push((order, record.decision));
             }
         }
+        decisions.sort_by(|a, b| a.0.cmp(&b.0));
 
-        Ok(latest
+        Ok(decisions
             .into_iter()
-            .map(|(notes, (_, state))| (notes, state))
+            .map(|(_, decision)| decision)
             .collect())
     }
 

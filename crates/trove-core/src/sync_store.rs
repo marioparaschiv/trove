@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-pub use decisions::{Decision, DecisionError, SuggestionState, note_pair};
+pub use decisions::{CategoryPin, Decision, DecisionError, SuggestionState, note_pair};
 
 const VECTORS_FOLDER: &str = "vectors";
 const EXTENSION: &str = "vec";
