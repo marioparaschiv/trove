@@ -11,6 +11,7 @@ test("opens the note at its best heading", () => {
     title: "Retry backoff",
     heading_path: ["Retry backoff", "Jitter"],
     score: 3.4,
+    why: ["meaning"],
   });
 
   assert.equal(url, "obsidian://open?vault=Notes%20Vault&file=Software%2FRetry%20backoff%23Jitter");
@@ -23,6 +24,7 @@ test("opens the note at the top when the match is before the first heading", () 
     title: "Birding journal",
     heading_path: [],
     score: 2.9,
+    why: ["meaning"],
   });
 
   assert.equal(url, "obsidian://open?vault=Notes%20Vault&file=Nature%2FBirding%20journal");
@@ -35,6 +37,7 @@ test("encodes characters that would end or split a query value", () => {
     title: "Bread & butter + jam",
     heading_path: ["Ratios: 100% hydration?"],
     score: 3.1,
+    why: ["meaning"],
   });
 
   assert.equal(

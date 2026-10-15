@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import createClient, { type Client } from "openapi-fetch";
+import createClient, { type Client, type ClientOptions } from "openapi-fetch";
 import type { components, paths } from "./schema.ts";
 
 export type Schemas = components["schemas"];
@@ -19,6 +19,8 @@ export interface ConnectOptions {
   binary: string;
   /** The data folder. Defaults to the one the binary uses without `TROVE_DATA_DIR` set. */
   dataDir?: string;
+  /** Sends the requests. Defaults to the global `fetch`. */
+  fetch?: ClientOptions["fetch"];
 }
 
 const RUNTIME_FILE = "runtime.json";
@@ -29,6 +31,7 @@ const START_TIMEOUT_MS = 30_000;
 export async function connect({
   binary,
   dataDir = defaultDataDir(),
+  fetch,
 }: ConnectOptions): Promise<Connection> {
   const found = readRuntimeFile(dataDir);
   const runtime = found && isAlive(found.pid) ? found : await start(binary, dataDir);
@@ -38,6 +41,7 @@ export async function connect({
     client: createClient<paths>({
       baseUrl: `http://127.0.0.1:${runtime.port}`,
       headers: { Authorization: `Bearer ${runtime.token}` },
+      fetch,
     }),
   };
 }

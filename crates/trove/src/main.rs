@@ -1,4 +1,5 @@
 mod commands;
+mod searcher;
 mod service;
 
 use clap::Parser;

@@ -73,3 +73,22 @@ test("reports why the service failed to start", async (t) => {
 
   await assert.rejects(connect({ binary, dataDir: dir }), /service_idle_timeout/);
 });
+
+test("sends requests through the given fetch", async (t) => {
+  const dir = dataDir(t);
+  const paths: string[] = [];
+  const { client } = await connect({
+    binary,
+    dataDir: dir,
+    fetch: (request) => {
+      paths.push(new URL(request.url).pathname);
+
+      return fetch(request);
+    },
+  });
+
+  const status = await client.GET("/status");
+
+  assert.equal(status.response.status, 200);
+  assert.deepEqual(paths, ["/status"]);
+});
