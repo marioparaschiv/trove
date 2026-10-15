@@ -23,6 +23,8 @@ export class CategoryEdits {
   private readonly vaultPath: string;
   /** Every note's category properties as last seen, to tell which property an edit changed. */
   private states = new Map<string, NoteState>();
+  /** The last send: Trove keeps the pin that arrives last, so each send waits for the one before. */
+  private sending: Promise<void> = Promise.resolve();
 
   constructor(plugin: TrovePlugin, binary: Promise<string>, vaultPath: string) {
     this.plugin = plugin;
@@ -146,7 +148,15 @@ export class CategoryEdits {
     this.send(pins).catch((error: unknown) => new Notice(`Trove: ${message(error)}`));
   }
 
-  private async send(pins: CategoryPin[]): Promise<void> {
+  private send(pins: CategoryPin[]): Promise<void> {
+    const sent = this.sending.then(() => this.put(pins));
+    // The caller reports the failure; the next send goes ahead regardless.
+    this.sending = sent.catch(() => undefined);
+
+    return sent;
+  }
+
+  private async put(pins: CategoryPin[]): Promise<void> {
     const client = await connectTo(await this.binary);
     const source = await vaultSource(client, this.vaultPath);
     if (source === undefined) {
