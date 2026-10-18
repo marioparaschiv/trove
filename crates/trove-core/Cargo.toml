@@ -13,6 +13,7 @@ getrandom.workspace = true
 half.workspace = true
 hex.workspace = true
 humantime.workspace = true
+memmap2.workspace = true
 network_partitions.workspace = true
 notify.workspace = true
 rand.workspace = true
@@ -32,6 +33,7 @@ ureq.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
 uuid.workspace = true
+zerocopy.workspace = true
 
 [lints]
 workspace = true

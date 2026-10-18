@@ -1,5 +1,6 @@
 mod sources;
 mod stats;
+mod vector_scan;
 mod vectors;
 
 use std::{
@@ -11,9 +12,11 @@ use rusqlite::{Connection, Transaction, TransactionBehavior};
 use thiserror::Error;
 
 use crate::{data_dir::DataDir, graph::VaultGraph};
+use vector_scan::VectorScan;
 
 pub use sources::{Source, SourceError};
 pub use stats::IndexStats;
+pub use vector_scan::{VECTOR_SCAN_FILE, VectorScanError};
 pub(crate) use vectors::SectionVector;
 
 pub const INDEX_FILE: &str = "index.sqlite";
@@ -26,6 +29,9 @@ pub struct Index {
     conn: Connection,
     /// The graph search reranks with, and the index version it was loaded at.
     graph: Option<(Version, Arc<VaultGraph>)>,
+    vector_scan_path: PathBuf,
+    /// The mapped vector scan file, and the index version it was last checked at.
+    vector_scan: Option<(Version, VectorScan)>,
 }
 
 /// Changes whenever anything writes to the index, through this connection or another.
@@ -55,6 +61,8 @@ pub enum IndexError {
     },
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    VectorScan(#[from] VectorScanError),
 }
 
 impl Index {
@@ -93,7 +101,12 @@ impl Index {
         }
         tx.commit()?;
 
-        Ok(Self { conn, graph: None })
+        Ok(Self {
+            conn,
+            graph: None,
+            vector_scan_path: data_dir.path().join(VECTOR_SCAN_FILE),
+            vector_scan: None,
+        })
     }
 
     pub fn schema_version(&self) -> Result<u32, IndexError> {

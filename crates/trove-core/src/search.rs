@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use crate::embedder::EmbedderError;
+use crate::{embedder::EmbedderError, index::VectorScanError};
 
 pub(crate) use collapse::CollapseToNotes;
 pub(crate) use fusion::Fusion;
@@ -64,6 +64,8 @@ pub enum SearchError {
     Index(#[from] rusqlite::Error),
     #[error(transparent)]
     Embedder(#[from] EmbedderError),
+    #[error(transparent)]
+    VectorScan(#[from] VectorScanError),
 }
 
 /// One step of search. Each stage gets the previous stage's candidates and returns its own.

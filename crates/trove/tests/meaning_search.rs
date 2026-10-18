@@ -7,6 +7,7 @@ use common::{
     run, search, trove, vault_copy,
 };
 use serde_json::{Value, json};
+use trove_core::index::VECTOR_SCAN_FILE;
 
 struct Paraphrase {
     query: &'static str,
@@ -126,6 +127,37 @@ fn notes_in_obsidian_and_trash_folders_are_never_indexed() {
         result_paths(&search(data_dir.path(), HIDDEN_TOPIC)),
         ["Beekeeping.md"]
     );
+}
+
+#[test]
+fn a_missing_or_stale_vector_scan_file_is_written_again_by_the_next_search() {
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
+    let scan_file = data_dir.path().join(VECTOR_SCAN_FILE);
+    let paraphrase = &PARAPHRASES[0];
+    let found = search(data_dir.path(), paraphrase.query);
+    assert_found_first(&found, paraphrase);
+
+    fs::remove_file(&scan_file).unwrap();
+    assert_eq!(search(data_dir.path(), paraphrase.query), found);
+    assert!(scan_file.is_file());
+
+    // The file from before an index run that adds a note, put back in place of the one that run wrote.
+    let stale = fs::read(&scan_file).unwrap();
+    fs::copy(
+        vault.path().join(".trash/Beekeeping.md"),
+        vault.path().join("Beekeeping.md"),
+    )
+    .unwrap();
+    run(data_dir.path(), &["index"]);
+    fs::write(&scan_file, &stale).unwrap();
+    let response: Value = serde_json::from_str(&run(
+        data_dir.path(),
+        &["search", "--json", "--no-words", "--no-graph", HIDDEN_TOPIC],
+    ))
+    .unwrap();
+    assert_eq!(result_paths(&response), ["Beekeeping.md"]);
+    assert_ne!(fs::read(&scan_file).unwrap(), stale);
 }
 
 #[test]

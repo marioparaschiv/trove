@@ -21,7 +21,7 @@ use crate::{
     config::Config,
     embedder::{Embedder, vector_version},
     error::full_message,
-    index::{self, Index, Source},
+    index::{self, Index, IndexError, Source},
     sync_store::{SyncStore, VectorFile},
 };
 
@@ -142,6 +142,9 @@ pub fn index_sources(
         &mut report,
     )?;
     update_graph_edges(index)?;
+    index::lock(index)
+        .rebuild_vector_scan()
+        .map_err(IndexError::from)?;
 
     Ok(report)
 }

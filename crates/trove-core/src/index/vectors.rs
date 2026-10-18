@@ -1,8 +1,10 @@
 use half::f16;
-use rusqlite::{OptionalExtension, types::Type};
-use thiserror::Error;
+use rusqlite::OptionalExtension;
 
-use super::Index;
+use super::{
+    Index,
+    vector_scan::{self, VectorScan, VectorScanError},
+};
 
 /// A chunk whose text has no vector yet.
 pub(crate) struct UnembeddedChunk {
@@ -16,13 +18,6 @@ pub(crate) struct SectionVector {
     pub(crate) file_id: i64,
     pub(crate) text_hash: Vec<u8>,
     pub(crate) vector: Vec<f32>,
-}
-
-#[derive(Debug, Error)]
-#[error("a stored vector has {found} bytes, but the query has {expected} dimensions")]
-struct WrongLength {
-    found: usize,
-    expected: usize,
 }
 
 impl Index {
@@ -116,34 +111,65 @@ impl Index {
         )
     }
 
-    /// Each embedded chunk's cosine similarity to `query`, a unit vector.
-    pub(crate) fn chunk_scores(&self, query: &[f32]) -> rusqlite::Result<Vec<(i64, f32)>> {
-        let mut statement = self
+    /// Each embedded chunk's cosine similarity to `query`, a unit vector, in chunk id order.
+    pub(crate) fn chunk_scores(
+        &mut self,
+        query: &[f32],
+    ) -> Result<Vec<(i64, f32)>, VectorScanError> {
+        self.vector_scan()?.scores(query)
+    }
+
+    /// Writes the vector scan file again from the index's vectors.
+    pub(crate) fn rebuild_vector_scan(&mut self) -> Result<(), VectorScanError> {
+        let version = self.version()?;
+        let scan = VectorScan::build(&self.conn, &self.vector_scan_path, &self.vector_version()?)?;
+        self.vector_scan = Some((version, scan));
+
+        Ok(())
+    }
+
+    /// The vector scan file, checked against the index whenever the index has changed or the file is gone, and
+    /// written again when it doesn't hold the index's current vectors.
+    fn vector_scan(&mut self) -> Result<&VectorScan, VectorScanError> {
+        let version = self.version()?;
+        let exists =
+            self.vector_scan_path
+                .try_exists()
+                .map_err(|source| VectorScanError::Read {
+                    path: self.vector_scan_path.clone(),
+                    source,
+                })?;
+        let checked = exists
+            && self
+                .vector_scan
+                .as_ref()
+                .is_some_and(|(checked_at, _)| *checked_at == version);
+
+        if !checked {
+            let vector_version = self.vector_version()?;
+            let fingerprint = vector_scan::fingerprint(&self.conn)?;
+            let scan = match VectorScan::open(&self.vector_scan_path)? {
+                Some(scan) if scan.is_current(&vector_version, &fingerprint) => scan,
+                _ => VectorScan::build(&self.conn, &self.vector_scan_path, &vector_version)?,
+            };
+            self.vector_scan = Some((version, scan));
+        }
+
+        let (_, scan) = self.vector_scan.as_ref().expect("checked or just set");
+        Ok(scan)
+    }
+
+    /// The `vector_version` the stored vectors were made under; empty before the first index run.
+    fn vector_version(&self) -> rusqlite::Result<String> {
+        Ok(self
             .conn
-            .prepare("SELECT c.id, v.vector FROM chunks c JOIN vectors v USING (text_hash)")?;
-
-        statement
-            .query_map([], |row| {
-                let vector = row.get_ref(1)?.as_blob()?;
-                if vector.len() != query.len() * 2 {
-                    return Err(rusqlite::Error::FromSqlConversionFailure(
-                        1,
-                        Type::Blob,
-                        Box::new(WrongLength {
-                            found: vector.len(),
-                            expected: query.len(),
-                        }),
-                    ));
-                }
-
-                let score = values(vector)
-                    .zip(query)
-                    .map(|(stored, &value)| stored * value)
-                    .sum();
-
-                Ok((row.get(0)?, score))
-            })?
-            .collect()
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'vector_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or_default())
     }
 
     /// Every section with a vector: its note, text hash and vector.

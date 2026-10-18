@@ -22,6 +22,7 @@ getrandom = "0.4.3"
 half = "2.7.1"
 hex = "0.4.3"
 humantime = "2.4.0"
+memmap2 = "0.9.11"
 # graspologic's hierarchical Leiden, which is not on crates.io.
 network_partitions = { git = "https://github.com/graspologic-org/graspologic-native", rev = "773181488b4e5b81925e302b972b294fd51f61a4" }
 notify = "8.2.0"
@@ -42,6 +43,7 @@ ureq = { version = "~3.4.2", default-features = false, features = ["rustls"] }
 utoipa = "6.0.0"
 utoipa-axum = "0.3.0"
 uuid = { version = "1.28.0", features = ["v4"] }
+zerocopy = { version = "0.8.63", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
