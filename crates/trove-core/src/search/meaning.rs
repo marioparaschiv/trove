@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, sync::Mutex};
 
 use super::{Candidate, Query, SearchError, Signal, Stage};
 use crate::{
-    embedder::{Embedder, Input},
+    embedder::Embedder,
     index::{self, Index},
 };
 
@@ -35,11 +35,7 @@ impl Stage for Meaning<'_> {
             return Ok(candidates);
         }
 
-        let query_vector = self
-            .embedder
-            .embed(&[Input::Query(&query.text)])?
-            .pop()
-            .expect("one vector per input");
+        let query_vector = self.embedder.embed_query(&query.text)?;
         let scores = index::lock(self.index).chunk_scores(&query_vector)?;
 
         let count = scores.len() as f32;

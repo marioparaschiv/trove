@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::PathBuf,
-    sync::{LazyLock, mpsc::Receiver},
+    sync::{Arc, LazyLock, mpsc::Receiver},
     time::Duration,
 };
 
@@ -250,6 +250,34 @@ fn unload_on_request_frees_the_model_and_load_brings_it_back() {
 
     embedder.load().unwrap();
     assert_eq!(next_event(&events), ModelEvent::Loaded);
+}
+
+#[test]
+fn a_repeated_query_gets_the_vector_the_model_made_the_first_time() {
+    let query = "payment declined error";
+    let first = EMBEDDER.embed_query(query).unwrap();
+    let again = EMBEDDER.embed_query(query).unwrap();
+
+    assert!(Arc::ptr_eq(&first, &again));
+    assert_eq!(*first, *EMBEDDER.embed(&[Input::Query(query)]).unwrap()[0]);
+}
+
+#[test]
+fn query_vectors_are_made_again_after_the_model_unloads() {
+    let embedder = Embedder::new(model_path(), Duration::from_millis(200));
+    let events = embedder.subscribe();
+
+    let first = embedder.embed_query("first").unwrap();
+    assert_eq!(next_event(&events), ModelEvent::Loaded);
+    assert_eq!(next_event(&events), ModelEvent::Unloaded);
+    let after_idle = embedder.embed_query("first").unwrap();
+    assert!(!Arc::ptr_eq(&first, &after_idle));
+    assert_eq!(first, after_idle);
+
+    embedder.unload();
+    let after_unload = embedder.embed_query("first").unwrap();
+    assert!(!Arc::ptr_eq(&after_idle, &after_unload));
+    assert_eq!(after_idle, after_unload);
 }
 
 #[test]
