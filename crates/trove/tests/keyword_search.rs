@@ -176,3 +176,45 @@ fn a_lookup_ranks_its_exact_match_above_a_stronger_meaning_match() {
     );
     assert_eq!(response["results"][1]["why"], json!(["meaning"]));
 }
+
+#[test]
+fn a_note_with_a_rare_query_word_ranks_above_one_with_more_common_ones_and_no_note_is_added_or_lost()
+ {
+    let vault = vault(&[
+        (
+            "Sumac.md",
+            "# Sumac\n\nA recipe with sumac, lemon and onion.\n",
+        ),
+        (
+            "Weeknight.md",
+            "# Weeknight\n\nA quick dinner recipe with rice.\n",
+        ),
+        ("Pasta.md", "# Pasta\n\nA quick dinner recipe with pasta.\n"),
+        ("Soup.md", "# Soup\n\nA quick dinner of soup.\n"),
+        ("Bike.md", "# Bike\n\nA quick ride along the river.\n"),
+        (
+            "Garden.md",
+            "# Garden\n\nTomatoes need sun, water and a stake to climb.\n",
+        ),
+    ]);
+    let data_dir = indexed(vault.path());
+
+    // Sumac.md has two of the four words, Weeknight.md and Pasta.md three, but "sumac" is in no other note.
+    let response: Value = serde_json::from_str(&run(
+        data_dir.path(),
+        &[
+            "search",
+            "--json",
+            "--no-meaning",
+            "--no-graph",
+            "quick dinner recipe with sumac",
+        ],
+    ))
+    .unwrap();
+    let matches = result_paths(&response);
+    assert_eq!(matches[0], "Sumac.md");
+    // The notes with at least half the words, rare or not.
+    let mut found = matches.clone();
+    found.sort();
+    assert_eq!(found, ["Pasta.md", "Soup.md", "Sumac.md", "Weeknight.md"]);
+}

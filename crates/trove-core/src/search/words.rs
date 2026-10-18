@@ -5,7 +5,7 @@ use std::{
 
 use rusqlite::Connection;
 
-use super::{Candidate, Query, SearchError, Signal, Stage};
+use super::{Candidate, Coverage, Query, SearchError, Signal, Stage};
 use crate::index::{self, Index, keyword_text};
 
 /// DigUp's stopwords (`Searcher.stopwords`), English then Bengali and Arabic. They say how to ask, not what to find, so
@@ -170,22 +170,20 @@ impl Stage for Words<'_> {
             }
         }
 
-        let mut words_in_note: HashMap<i64, usize> = HashMap::new();
         let mut notes_with = conn.prepare(
             "SELECT DISTINCT c.file_id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
              WHERE chunks_fts MATCH ?1",
         )?;
-        for pattern in &word_patterns {
-            for file_id in notes_with.query_map([pattern], |row| row.get(0))? {
-                *words_in_note.entry(file_id?).or_default() += 1;
-            }
-        }
-        for chunks in &substring_matches {
-            let notes: HashSet<i64> = chunks.iter().map(|&(_, file_id)| file_id).collect();
-            for file_id in notes {
-                *words_in_note.entry(file_id).or_default() += 1;
-            }
-        }
+        let mut notes_by_word: Vec<HashSet<i64>> = word_patterns
+            .iter()
+            .map(|pattern| notes_with.query_map([pattern], |row| row.get(0))?.collect())
+            .collect::<rusqlite::Result<_>>()?;
+        notes_by_word.extend(
+            substring_matches
+                .iter()
+                .map(|chunks| chunks.iter().map(|&(_, file_id)| file_id).collect()),
+        );
+        let coverage = coverage(conn, &notes_by_word)?;
 
         let mut matched = Vec::new();
         if !word_patterns.is_empty() {
@@ -210,13 +208,52 @@ impl Stage for Words<'_> {
 
             candidates.push(Candidate {
                 chunk_id,
-                score: words_in_note[&file_id] as f32 / terms.len() as f32,
+                score: coverage[&file_id].share,
                 why: BTreeSet::from([Signal::Words]),
+                coverage: Some(coverage[&file_id]),
             });
         }
 
         Ok(candidates)
     }
+}
+
+/// How much of the query each note has, from the notes each of the query's words is in. A word weighs its inverse
+/// document frequency over notes (BM25's), so a note with "sumac" ranks above one with only "recipe" for "recipe with
+/// sumac".
+fn coverage(
+    conn: &Connection,
+    notes_by_word: &[HashSet<i64>],
+) -> rusqlite::Result<HashMap<i64, Coverage>> {
+    let notes: f32 = conn.query_row("SELECT count(*) FROM files", [], |row| row.get(0))?;
+    let weights: Vec<f32> = notes_by_word
+        .iter()
+        .map(|with| {
+            let with = with.len() as f32;
+            (1.0 + (notes - with + 0.5) / (with + 0.5)).ln()
+        })
+        .collect();
+    let total_weight: f32 = weights.iter().sum();
+
+    let mut found: HashMap<i64, (usize, f32)> = HashMap::new();
+    for (with, weight) in notes_by_word.iter().zip(&weights) {
+        for &file_id in with {
+            let (words, words_weight) = found.entry(file_id).or_default();
+            *words += 1;
+            *words_weight += weight;
+        }
+    }
+
+    Ok(found
+        .into_iter()
+        .map(|(file_id, (words, words_weight))| {
+            let coverage = Coverage {
+                share: words as f32 / notes_by_word.len() as f32,
+                weighted: words_weight / total_weight,
+            };
+            (file_id, coverage)
+        })
+        .collect())
 }
 
 /// The content words of a query, normalised as keyword search keeps text: each run of word characters, lowercased,

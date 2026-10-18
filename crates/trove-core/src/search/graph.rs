@@ -90,6 +90,7 @@ impl Stage for GraphRerank<'_> {
                 chunk_id,
                 score: GRAPH_SHARE * relative,
                 why: BTreeSet::from([Signal::Graph]),
+                coverage: None,
             });
         }
 

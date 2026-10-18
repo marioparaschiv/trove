@@ -52,6 +52,7 @@ impl Stage for Meaning<'_> {
                 chunk_id,
                 score: (score - mean) / deviation,
                 why: BTreeSet::from([Signal::Meaning]),
+                coverage: None,
             })
             .filter(|candidate| candidate.score > 0.0)
             .collect();

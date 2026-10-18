@@ -52,6 +52,17 @@ pub struct Candidate {
     pub score: f32,
     /// The stages that found this chunk.
     pub why: BTreeSet<Signal>,
+    /// How much of the query the chunk's note has, for a chunk found by words.
+    pub coverage: Option<Coverage>,
+}
+
+/// How much of the query's words a note has.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Coverage {
+    /// The share of the query's words in the note, which decides whether it matches by words.
+    pub share: f32,
+    /// The share with each word weighted by how few notes have it, which ranks the notes that match.
+    pub weighted: f32,
 }
 
 #[derive(Debug, Error)]

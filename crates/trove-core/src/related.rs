@@ -93,6 +93,7 @@ pub fn related(
             chunk_id,
             score: rank / best,
             why: BTreeSet::from([Signal::Graph]),
+            coverage: None,
         })
         .collect();
 

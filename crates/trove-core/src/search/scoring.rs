@@ -3,7 +3,7 @@ use std::{
     sync::Mutex,
 };
 
-use super::{Candidate, Query, SearchError, Signal, Stage, collapse::note_ids, words};
+use super::{Candidate, Coverage, Query, SearchError, Signal, Stage, collapse::note_ids, words};
 use crate::index::{self, Index};
 
 /// How many standard deviations above this query's average a note's best chunk must score to match by meaning. Set by
@@ -25,11 +25,11 @@ const LOOKUP_MEANING_WEIGHT: f32 = 0.5;
 const LOOKUP_WORD_WEIGHT: f32 = 2.0 * WORD_WEIGHT;
 
 /// Scores notes as DigUp does, from the meaning and word candidates before it. A note matches when its best chunk's
-/// meaning stands out ([`MIN_Z`]) or it has at least [`MIN_COVERAGE`] of the query's words, and scores
-/// `meaning weight × z + word weight × coverage ^ COVERAGE_POWER`, z being 0 for a note meaning didn't add (it adds
-/// only chunks above the query's average). Adds one candidate per matching note, best first: its
-/// best chunk by meaning when that stands out, else its best word match. It lists meaning when meaning stood out and
-/// words when the note has any of the words.
+/// meaning stands out ([`MIN_Z`]) or it has at least [`MIN_COVERAGE`] of the query's words, all words alike, and
+/// scores `meaning weight × z + word weight × coverage ^ COVERAGE_POWER`, z being 0 for a note meaning didn't add (it
+/// adds only chunks above the query's average), and coverage weighing rare words more ([`Coverage::weighted`]). Adds
+/// one candidate per matching note, best first: its best chunk by meaning when that stands out, else its best word
+/// match. It lists meaning when meaning stood out and words when the note has any of the words.
 pub struct Scoring<'a> {
     index: &'a Mutex<Index>,
 }
@@ -46,7 +46,7 @@ struct Note {
     /// The best chunk by meaning, and its z-score.
     meaning: Option<(i64, f32)>,
     /// The best chunk by words, and the note's coverage.
-    words: Option<(i64, f32)>,
+    words: Option<(i64, Coverage)>,
 }
 
 impl Stage for Scoring<'_> {
@@ -63,13 +63,12 @@ impl Stage for Scoring<'_> {
             };
 
             let note = notes.entry(file_id).or_default();
-            let found = Some((candidate.chunk_id, candidate.score));
-            if candidate.why.contains(&Signal::Meaning) {
-                if note.meaning.is_none_or(|(_, z)| candidate.score > z) {
-                    note.meaning = found;
+            if let Some(coverage) = candidate.coverage {
+                if note.words.is_none() {
+                    note.words = Some((candidate.chunk_id, coverage));
                 }
-            } else if note.words.is_none() {
-                note.words = found;
+            } else if note.meaning.is_none_or(|(_, z)| candidate.score > z) {
+                note.meaning = Some((candidate.chunk_id, candidate.score));
             }
         }
 
@@ -83,9 +82,9 @@ impl Stage for Scoring<'_> {
             .into_iter()
             .filter_map(|(file_id, note)| {
                 let z = note.meaning.map_or(0.0, |(_, z)| z);
-                let coverage = note.words.map_or(0.0, |(_, coverage)| coverage);
+                let coverage = note.words.map(|(_, coverage)| coverage).unwrap_or_default();
                 let stands_out = z >= MIN_Z;
-                if !stands_out && coverage < MIN_COVERAGE {
+                if !stands_out && coverage.share < MIN_COVERAGE {
                     return None;
                 }
 
@@ -96,15 +95,21 @@ impl Stage for Scoring<'_> {
                 if note.words.is_some() {
                     why.insert(Signal::Words);
                 }
-                let (chunk_id, _) = if stands_out { note.meaning } else { note.words }
-                    .expect("a note that matches has the chunk it matched by");
+                let chunk_id = if stands_out {
+                    note.meaning.map(|(chunk_id, _)| chunk_id)
+                } else {
+                    note.words.map(|(chunk_id, _)| chunk_id)
+                }
+                .expect("a note that matches has the chunk it matched by");
 
                 Some((
                     file_id,
                     Candidate {
                         chunk_id,
-                        score: meaning_weight * z + word_weight * coverage.powf(COVERAGE_POWER),
+                        score: meaning_weight * z
+                            + word_weight * coverage.weighted.powf(COVERAGE_POWER),
                         why,
+                        coverage: None,
                     },
                 ))
             })
