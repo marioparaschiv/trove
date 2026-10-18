@@ -4,9 +4,7 @@ use std::{
     sync::Mutex,
 };
 
-use super::{
-    Candidate, Coverage, Query, SearchError, Signal, Stage, Weights, collapse::note_ids, words,
-};
+use super::{Candidate, Coverage, Query, SearchError, Signal, Stage, Weights, note_ids, words};
 use crate::index::{self, Index};
 
 /// How many standard deviations above this query's average a note's best chunk must score to match by meaning. Set by

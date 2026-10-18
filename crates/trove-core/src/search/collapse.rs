@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex};
 
-use super::{Candidate, Query, SearchError, Stage};
+use super::{Candidate, Query, SearchError, Stage, note_ids};
 use crate::index::{self, Index};
 
 /// Keeps each note's best chunk, so results are notes that point at their best heading, listing every stage that found
@@ -46,24 +46,4 @@ impl Stage for CollapseToNotes<'_> {
 
         Ok(collapsed)
     }
-}
-
-/// The note of each candidate's chunk, by chunk id.
-pub(super) fn note_ids(
-    index: &Index,
-    candidates: &[Candidate],
-) -> rusqlite::Result<HashMap<i64, i64>> {
-    let chunk_ids: Vec<i64> = candidates
-        .iter()
-        .map(|candidate| candidate.chunk_id)
-        .collect();
-    let mut statement = index
-        .connection()
-        .prepare("SELECT id, file_id FROM chunks WHERE id IN (SELECT value FROM json_each(?1))")?;
-
-    statement
-        .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect()
 }

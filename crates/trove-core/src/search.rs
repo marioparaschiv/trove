@@ -7,13 +7,19 @@ mod scoring;
 mod weights;
 mod words;
 
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use crate::{embedder::EmbedderError, index::VectorScanError};
+use crate::{
+    embedder::EmbedderError,
+    index::{Index, VectorScanError},
+};
 
 pub(crate) use collapse::CollapseToNotes;
 pub(crate) use graph::GraphRerank;
@@ -108,4 +114,21 @@ impl<'a> Pipeline<'a> {
             .iter()
             .try_fold(Vec::new(), |candidates, stage| stage.run(query, candidates))
     }
+}
+
+/// The note of each candidate's chunk, by chunk id.
+fn note_ids(index: &Index, candidates: &[Candidate]) -> rusqlite::Result<HashMap<i64, i64>> {
+    let chunk_ids: Vec<i64> = candidates
+        .iter()
+        .map(|candidate| candidate.chunk_id)
+        .collect();
+    let mut statement = index
+        .connection()
+        .prepare("SELECT id, file_id FROM chunks WHERE id IN (SELECT value FROM json_each(?1))")?;
+
+    statement
+        .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect()
 }
