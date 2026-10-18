@@ -1,7 +1,7 @@
 //! What `trove eval --fit` fits the ranking [`Weights`] on: each note a query matches, with the signals scoring ranks
 //! it by. Search itself never reads them this way.
 
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use super::{Meaning, Pipeline, Query, SearchError, Signals, Weights, Words, scoring, words};
 use crate::{
@@ -49,18 +49,23 @@ pub fn query_features(
 
     let index = index::lock(index);
     let matches = scoring::matches(&index, candidates)?;
-    let mut path_of = index
+    let file_ids: Vec<i64> = matches.iter().map(|note| note.file_id).collect();
+    let mut paths: HashMap<i64, String> = index
         .connection()
-        .prepare_cached("SELECT path FROM files WHERE id = ?1")?;
-    let mut notes = matches
+        .prepare("SELECT id, path FROM files WHERE id IN (SELECT value FROM json_each(?1))")?
+        .query_map([serde_json::Value::from(file_ids).to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut notes: Vec<NoteFeatures> = matches
         .into_iter()
-        .map(|note| {
-            Ok(NoteFeatures {
-                path: path_of.query_row([note.file_id], |row| row.get(0))?,
-                signals: note.signals,
-            })
+        .map(|note| NoteFeatures {
+            path: paths
+                .remove(&note.file_id)
+                .expect("a matching note is in files"),
+            signals: note.signals,
         })
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+        .collect();
     notes.sort_by(|a, b| a.path.cmp(&b.path));
 
     Ok(QueryFeatures {
