@@ -113,9 +113,16 @@ fn a_note_matching_in_several_sections_ranks_above_one_with_a_single_closer_para
     .unwrap();
     let data_dir = indexed(vault.path());
 
+    // Long enough not to be expanded with its best chunk, which would pull it towards that one paragraph.
     let response: Value = serde_json::from_str(&run(
         data_dir.path(),
-        &["search", "--json", "--no-words", "--no-graph", "kayak trip"],
+        &[
+            "search",
+            "--json",
+            "--no-words",
+            "--no-graph",
+            "a kayak trip out on the sea with friends again",
+        ],
     ))
     .unwrap();
     assert_eq!(
@@ -137,6 +144,11 @@ fn a_query_matching_nothing_finds_nothing() {
     assert_eq!(
         run(data_dir.path(), &["search", MATCHES_NOTHING]),
         "no matches\n"
+    );
+    // Short enough to be expanded with what it finds, which is nothing.
+    assert_eq!(
+        search(data_dir.path(), "quantum chromodynamics"),
+        json!({ "results": [] })
     );
 }
 

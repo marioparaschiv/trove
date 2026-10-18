@@ -119,6 +119,14 @@ impl Index {
         self.vector_scan()?.scores(query)
     }
 
+    /// The vectors of the chunks at `rows`, positions in [`Self::chunk_scores`], as the scan file holds them.
+    pub(crate) fn chunk_vectors(
+        &mut self,
+        rows: &[usize],
+    ) -> Result<Vec<Vec<f32>>, VectorScanError> {
+        Ok(self.vector_scan()?.vectors(rows))
+    }
+
     /// Writes the vector scan file again from the index's vectors.
     pub(crate) fn rebuild_vector_scan(&mut self) -> Result<(), VectorScanError> {
         let version = self.version()?;

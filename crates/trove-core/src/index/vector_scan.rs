@@ -256,6 +256,26 @@ impl VectorScan {
         self.header.vector_version == vector_version && &self.header.fingerprint == fingerprint
     }
 
+    /// The vectors of `rows` (positions in [`Self::scores`]), back from int8: each about the vector the index holds.
+    pub(crate) fn vectors(&self, rows: &[usize]) -> Vec<Vec<f32>> {
+        let dims = self.header.dims as usize;
+        let checked = "checked when the file was read";
+        let (vectors, rest) =
+            self.map[HEADER_LEN..].split_at(self.header.vectors_len().expect(checked));
+        let vectors = <[i8]>::ref_from_bytes(vectors).expect("any bytes are i8s");
+
+        rows.iter()
+            .map(|&row| {
+                let at = row * size_of::<f32>();
+                let scale = f32::from_le_bytes(rest[at..at + size_of::<f32>()].try_into().unwrap());
+                vectors[row * dims..(row + 1) * dims]
+                    .iter()
+                    .map(|&value| f32::from(value) * scale)
+                    .collect()
+            })
+            .collect()
+    }
+
     /// Each row's chunk id and dot product with `query`, quantised as the rows are: about the cosine similarity, both
     /// being unit vectors.
     pub(crate) fn scores(&self, query: &[f32]) -> Result<Vec<(i64, f32)>, VectorScanError> {

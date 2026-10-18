@@ -11,7 +11,7 @@ use crate::index::{self, Index};
 /// the eval on the fixture vault's 34 chunks: the weakest wanted best match scores 2.47, while queries on topics the
 /// vault lacks top out at 2.27 (DigUp's 2.0 lets them through). On the 300-note eval vault every cutoff from 2.0 to
 /// 2.65 ranks alike; 2.8 and up lose answers from the top 10.
-const MIN_Z: f32 = 2.35;
+pub(super) const MIN_Z: f32 = 2.35;
 /// The share of the query's words a note must have to match by words alone.
 const MIN_COVERAGE: f32 = 0.5;
 /// Coverage counts to this power, so a note with every word of the query pulls ahead of one with most of them.
