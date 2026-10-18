@@ -1,7 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use anyhow::{Context as _, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use trove_core::search::SearchRequest;
 
 use super::Context;
@@ -12,18 +12,129 @@ const DEPTH: u32 = 10;
 
 #[derive(clap::Args)]
 pub struct Args {
-    /// A JSON array of `{"query": ..., "note": ...}`, where `note` is the path of the note the query should find,
-    /// `/`-separated inside its source
+    /// A JSON array of `{"query": ..., "kind": ..., "lang": ..., "note": ...}`. `kind` is paraphrase, lookup,
+    /// question, vague, typo or no_answer, and `lang` the query's language code. `note` is the path of the note the
+    /// query should find, `/`-separated inside its source, and null for a no_answer query, which should find nothing
     queries: PathBuf,
+    /// Also write the scores and each query's rank to this file as JSON, to diff runs
+    #[arg(long)]
+    out: Option<PathBuf>,
     #[command(flatten)]
     stages: StageSwitches,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct EvalQuery {
     query: String,
-    note: String,
+    lang: String,
+    #[serde(flatten)]
+    expected: Expected,
+}
+
+/// What a query should find, by its kind.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Expected {
+    /// Describes the note in words it doesn't use.
+    Paraphrase { note: String },
+    /// Names a rare term of the note: a name, code or number.
+    Lookup { note: String },
+    /// Asks about the note in a full sentence.
+    Question { note: String },
+    /// One to three words.
+    Vague { note: String },
+    /// Misspells one key word of the note.
+    Typo { note: String },
+    /// Asks about a topic no note covers, so it should find nothing.
+    NoAnswer {
+        #[expect(
+            dead_code,
+            reason = "parsed only to require null, so a note here is an error"
+        )]
+        note: (),
+    },
+}
+
+impl Expected {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Paraphrase { .. } => "paraphrase",
+            Self::Lookup { .. } => "lookup",
+            Self::Question { .. } => "question",
+            Self::Vague { .. } => "vague",
+            Self::Typo { .. } => "typo",
+            Self::NoAnswer { .. } => "no_answer",
+        }
+    }
+
+    fn note(&self) -> Option<&str> {
+        match self {
+            Self::Paraphrase { note }
+            | Self::Lookup { note }
+            | Self::Question { note }
+            | Self::Vague { note }
+            | Self::Typo { note } => Some(note),
+            Self::NoAnswer { .. } => None,
+        }
+    }
+}
+
+/// The scores of a group of queries that each have a note. No-answer queries never enter one; they are scored only
+/// by the share of them that find nothing.
+#[derive(Serialize, Default)]
+struct Score {
+    queries: usize,
+    hits_at_1: usize,
+    hits_at_10: usize,
+    #[serde(skip)]
+    reciprocal_ranks: f64,
+    r_at_1: f64,
+    r_at_10: f64,
+    mrr: f64,
+}
+
+impl Score {
+    fn add(&mut self, rank: Option<usize>) {
+        self.queries += 1;
+        if let Some(rank) = rank {
+            self.hits_at_1 += usize::from(rank == 1);
+            self.hits_at_10 += usize::from(rank <= DEPTH as usize);
+            self.reciprocal_ranks += 1.0 / rank as f64;
+        }
+
+        let count = self.queries as f64;
+        self.r_at_1 = self.hits_at_1 as f64 / count;
+        self.r_at_10 = self.hits_at_10 as f64 / count;
+        self.mrr = self.reciprocal_ranks / count;
+    }
+}
+
+#[derive(Serialize)]
+struct NoAnswerScore {
+    queries: usize,
+    empty: usize,
+    empty_share: f64,
+}
+
+#[derive(Serialize)]
+struct QueryOutcome<'a> {
+    query: &'a str,
+    kind: &'static str,
+    lang: &'a str,
+    note: Option<&'a str>,
+    /// The place of the note in the results, from 1; `None` when it is missing or the query has no note.
+    rank: Option<usize>,
+    results: usize,
+}
+
+#[derive(Serialize)]
+struct Summary<'a> {
+    /// Every query that has a note; `None` when no query has one.
+    overall: Option<Score>,
+    kinds: BTreeMap<&'static str, Score>,
+    langs: BTreeMap<&'a str, Score>,
+    no_answer: Option<NoAnswerScore>,
+    queries: Vec<QueryOutcome<'a>>,
 }
 
 pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
@@ -32,7 +143,7 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
     let searcher = Searcher::connect(ctx)?;
     let skip = args.stages.skip();
 
-    let mut ranks: Vec<Option<usize>> = Vec::with_capacity(queries.len());
+    let mut outcomes = Vec::with_capacity(queries.len());
     for eval_query in &queries {
         let response = searcher
             .search(&SearchRequest {
@@ -41,36 +152,42 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
                 skip: skip.clone(),
             })
             .with_context(|| format!("failed to search for {:?}", eval_query.query))?;
-        let rank = response
-            .results
-            .iter()
-            .position(|result| result.path == eval_query.note)
-            .map(|place| place + 1);
+        let note = eval_query.expected.note();
+        let rank = note.and_then(|note| {
+            response
+                .results
+                .iter()
+                .position(|result| result.path == note)
+                .map(|place| place + 1)
+        });
+        let outcome = QueryOutcome {
+            query: &eval_query.query,
+            kind: eval_query.expected.kind(),
+            lang: &eval_query.lang,
+            note,
+            rank,
+            results: response.results.len(),
+        };
 
-        let shown = rank.map_or_else(|| "-".to_owned(), |rank| rank.to_string());
-        println!("{shown:>2}  {}", eval_query.query);
-        ranks.push(rank);
+        let shown = match (note, rank) {
+            (Some(_), Some(rank)) => rank.to_string(),
+            (Some(_), None) => "-".to_owned(),
+            (None, _) if outcome.results == 0 => "ok".to_owned(),
+            (None, _) => format!("+{}", outcome.results),
+        };
+        println!(
+            "{shown:>3}  {:<10} {:<3} {}",
+            outcome.kind, outcome.lang, outcome.query
+        );
+        outcomes.push(outcome);
     }
 
-    let count = ranks.len() as f64;
-    let recall_at = |depth: usize| {
-        ranks
-            .iter()
-            .filter(|rank| rank.is_some_and(|rank| rank <= depth))
-            .count() as f64
-            / count
-    };
-    let mrr = ranks
-        .iter()
-        .flatten()
-        .map(|&rank| 1.0 / rank as f64)
-        .sum::<f64>()
-        / count;
-
-    println!();
-    println!("recall@5   {:.3}", recall_at(5));
-    println!("recall@10  {:.3}", recall_at(10));
-    println!("MRR        {mrr:.3}");
+    let summary = summarize(outcomes);
+    print_summary(&summary);
+    if let Some(out) = &args.out {
+        let json = serde_json::to_vec_pretty(&summary)?;
+        fs::write(out, json).with_context(|| format!("failed to write {}", out.display()))?;
+    }
 
     Ok(())
 }
@@ -81,10 +198,80 @@ fn read_queries(args: &Args) -> anyhow::Result<Vec<EvalQuery>> {
         bail!("the file has no queries");
     }
     for (place, eval_query) in queries.iter().enumerate() {
-        if eval_query.query.trim().is_empty() || eval_query.note.trim().is_empty() {
-            bail!("query {} has an empty `query` or `note`", place + 1);
+        let blank_note = eval_query
+            .expected
+            .note()
+            .is_some_and(|note| note.trim().is_empty());
+        if eval_query.query.trim().is_empty() || eval_query.lang.trim().is_empty() || blank_note {
+            bail!("query {} has an empty `query`, `lang` or `note`", place + 1);
         }
     }
 
     Ok(queries)
+}
+
+fn summarize(outcomes: Vec<QueryOutcome<'_>>) -> Summary<'_> {
+    let mut overall = Score::default();
+    let mut kinds: BTreeMap<&str, Score> = BTreeMap::new();
+    let mut langs: BTreeMap<&str, Score> = BTreeMap::new();
+    let (mut unanswered, mut empty) = (0, 0);
+    for outcome in &outcomes {
+        if outcome.note.is_none() {
+            unanswered += 1;
+            empty += usize::from(outcome.results == 0);
+            continue;
+        }
+
+        overall.add(outcome.rank);
+        kinds.entry(outcome.kind).or_default().add(outcome.rank);
+        langs.entry(outcome.lang).or_default().add(outcome.rank);
+    }
+
+    Summary {
+        overall: (overall.queries > 0).then_some(overall),
+        kinds,
+        langs,
+        no_answer: (unanswered > 0).then(|| NoAnswerScore {
+            queries: unanswered,
+            empty,
+            empty_share: empty as f64 / unanswered as f64,
+        }),
+        queries: outcomes,
+    }
+}
+
+fn print_summary(summary: &Summary<'_>) {
+    println!();
+    print_scores("kind", &summary.kinds);
+    if let Some(overall) = &summary.overall {
+        print_score_row("overall", overall);
+    }
+
+    println!();
+    print_scores("lang", &summary.langs);
+
+    if let Some(no_answer) = &summary.no_answer {
+        println!();
+        println!(
+            "no_answer  {:>7}  empty {}/{} = {:.3}",
+            no_answer.queries, no_answer.empty, no_answer.queries, no_answer.empty_share
+        );
+    }
+}
+
+fn print_scores(group: &str, scores: &BTreeMap<&str, Score>) {
+    println!(
+        "{group:<10} {:>7}  {:>5}  {:>5}  {:>5}",
+        "queries", "R@1", "R@10", "MRR"
+    );
+    for (name, score) in scores {
+        print_score_row(name, score);
+    }
+}
+
+fn print_score_row(name: &str, score: &Score) {
+    println!(
+        "{name:<10} {:>7}  {:.3}  {:.3}  {:.3}",
+        score.queries, score.r_at_1, score.r_at_10, score.mrr
+    );
 }

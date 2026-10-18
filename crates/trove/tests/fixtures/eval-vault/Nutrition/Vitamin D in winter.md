@@ -1,0 +1,4 @@
+---
+tags: [vitamin-d, bloodwork]
+---
+Toronto is at 43.7°N, which means from about November to February the UVB isn't strong enough for skin to make any vitamin D at all, and on night shift weeks I barely see daylight anyway. 25-OH vitamin D was 48 nmol/L in February 2024 (insufficient, under 50). Dr. Abernathy-Kwan: 1,000 IU daily October to April. I bumped it to 2,000 IU after reading the Osteoporosis Canada guidance for adults with low levels, she said fine. Jamieson D3 softgels, 2,000 IU, $11.49 for 180 at Costco, taken with breakfast because it needs fat. Recheck on 2025-03-11: 81 nmol/L, nice. Not paying $50 for the test every year, she'll only order it again if something changes. Same LifeLabs draw as the ferritin, see [[Iron deficiency]]. Bone density matters for runners too, especially with low iron history and the miles... sorry, kilometres. Calcium from yogurt, about 3 servings a day ([[Protein intake]]).

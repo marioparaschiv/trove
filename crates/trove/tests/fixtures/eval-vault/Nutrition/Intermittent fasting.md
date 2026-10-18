@@ -1,0 +1,3 @@
+#nutrition #experiment
+
+Tried 16:8 from 2025-01-06 to 2025-01-26 because half the unit was doing it after New Year. Eating window noon to 8 pm. Lasted 3 weeks. Day shifts: fine-ish, hungry and snappy by 11 at the med cart. Night shifts: no idea when the "window" even is, gave up working it out. The deal breaker was a Saturday long run on 2025-01-18 fasted: 18 km, shaky and lightheaded at km 15, glucose on the work meter at home was 3.6 mmol/L. Never again before a long run. Weight went from 61.4 to 60.9 kg, which is nothing. Protein dropped to about 70 g a day because the window was too short to fit it in ([[Protein intake]]). Not for shift workers who run, at least not for me. Fuel notes in [[Electrolytes for long runs]].

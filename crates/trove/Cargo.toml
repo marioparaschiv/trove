@@ -16,7 +16,9 @@ ureq.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+rusqlite.workspace = true
 sha2.workspace = true
+stop-words.workspace = true
 tempfile.workspace = true
 
 [lints]

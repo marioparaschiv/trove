@@ -1,0 +1,5 @@
+---
+tags: [baking, kit]
+date: 2025-01-08
+---
+Bought two Taylor 5932 oven thermometers (£11 each) on 8 Jan 2025 after batch 7 of croissants came out scorched outside and raw inside. First checked the probes themselves: ice slurry read 0.5°C, a full boil read 99.5°C, so both within a degree, good enough. Then left them on the middle shelf for 20 min at each setting on the truck's Lincat LMO3: set 160 = actual 174, set 180 = actual 197, set 220 = actual 231. So it's 11 to 17 degrees over across the range, and worse again in the back left corner (another 6). The knob now has a strip of masking tape with the corrected settings in Sharpie: for 180 set 165, for 190 set 175, for 150 set 138. Home oven (Bosch HBS534) is 4 under, not worth caring about. Re-check every 3 months, next one due April 2025, put it in the phone. Rob did the [[Smart thermostat install]] at the flat that same weekend so it was a week of us both staring at numbers. Adjusted temps are already in [[Laminated croissant dough]] and [[Braised short ribs]].

@@ -1,0 +1,4 @@
+---
+tags: [fermentation, kit]
+---
+What's on the shelf, Feb 2025: 6 Kilner glass weights (wide mouth, £12 for 4 on Amazon, the best thing I own for this), 4 Masontops Pickle Pipe silicone lids (one-way valve, no water to top up), 2 classic 3-piece airlocks in drilled 3 L jar lids (£2.50 each, water evaporates in a warm week, check them), 1 Ohio-style 5 L fermenting pot with a water channel and its own pair of fitted weights, used for big kraut batches... no, the Ohio pot is 10 L, the 5 L was the glass one I cracked in Nov 2024. Zip bag full of 3% brine also works as a weight if nothing else fits: if it leaks, it's brine, no harm. Rule: everything under the brine, 2 cm at least. Above the brine is where kahm and mould start. Used for [[Sauerkraut]], [[Kimchi batch log]] and [[Hot sauce mash]].

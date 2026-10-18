@@ -1,0 +1,3 @@
+#film-club #awards
+
+97th Academy Awards, 2 March 2025. Club sweepstake, £2 a sheet, 23 categories, 17 entries, winner takes £34. My picks: Best Picture "The Brutalist" (wrong, "Anora" won, and I'd seen "Anora" at [[Festival notes Cannes 2024]], I should have known), Director Brady Corbet (wrong, Sean Baker), Actress Demi Moore (wrong, Mikey Madison), Actor Adrien Brody (right), Animated Feature "Flow" (right, the Latvian cat one, made in Blender, see [[Animation studios]]), Cinematography Lol Crawley (right). Score 14/23. Ishbel got 19 and bought the first round at the Laurieston with it, which was gracious. Note to self for 2026: the guilds call it, not the critics.

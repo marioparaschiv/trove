@@ -28,6 +28,16 @@ pub const CATEGORIES_VAULT: &str = concat!(
     "/tests/fixtures/categories-vault"
 );
 
+/// About 300 notes in 25 topic folders, a fifth of them in Spanish, German, Arabic, Hindi, Chinese or Japanese, linked
+/// across folders and holding near-topic distractor pairs: the corpus `EVAL_QUERIES` scores search on.
+pub const EVAL_VAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/eval-vault");
+
+/// The queries `trove eval` scores the eval vault with.
+pub const EVAL_QUERIES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/eval-queries.json"
+);
+
 /// Notes on coffee, a trip, and three topics unrelated to either.
 pub const RELATED_VAULT: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
