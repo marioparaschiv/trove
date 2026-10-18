@@ -159,7 +159,8 @@ fn fixed_texts_match_the_committed_reference_vectors() {
 }
 
 /// GPU (Metal, Vulkan) and CPU vectors share one index only while they agree; otherwise the backend has to go into
-/// `vector_version`. Every Mac has Metal; elsewhere this needs a discrete GPU with a Vulkan driver and checks nothing without one.
+/// `vector_version`. Every Mac has Metal; elsewhere this needs a discrete GPU with a Vulkan driver and checks nothing
+/// without one.
 #[test]
 fn gpu_and_cpu_vectors_for_the_reference_texts_agree() {
     use trove_core::embedder::{Devices, has_gpu};
@@ -187,25 +188,30 @@ fn gpu_and_cpu_vectors_for_the_reference_texts_agree() {
     }
 }
 
-/// A background run and the searches around it share one loaded model; each call takes its own profile.
+/// A background run and the searches around it share one loaded model; each call takes its own profile. Vector files
+/// must come out byte for byte the same whichever run wrote them.
 #[test]
-fn background_and_foreground_calls_on_one_model_make_the_same_vectors() {
+fn background_and_foreground_calls_on_one_model_make_identical_vectors() {
     let embedder = Embedder::new(model_path(), Duration::from_secs(180));
     let foreground = reference_vectors(&embedder, Profile::Foreground);
-    let background = reference_vectors(&embedder, Profile::Background);
-    let foreground_after = reference_vectors(&embedder, Profile::Foreground);
 
-    for (name, vector) in &foreground {
-        for (other, vectors) in [
-            ("background", &background),
-            ("later foreground", &foreground_after),
-        ] {
-            let similarity = cosine(vector, &vectors[name]);
-            assert!(
-                similarity >= AGREEMENT,
-                "{name}: foreground and {other} vectors at cosine {similarity}"
-            );
-        }
+    assert_eq!(
+        reference_vectors(&embedder, Profile::Background),
+        foreground
+    );
+    assert_eq!(
+        reference_vectors(&embedder, Profile::Foreground),
+        foreground
+    );
+}
+
+#[test]
+fn a_text_embedded_alone_gets_the_vector_it_gets_among_others() {
+    let together = reference_vectors(&EMBEDDER, Profile::Foreground);
+
+    for (name, input) in reference_inputs() {
+        let alone = EMBEDDER.embed(&[input], Profile::Foreground).unwrap();
+        assert_eq!(alone, [together[name].clone()], "{name}");
     }
 }
 
