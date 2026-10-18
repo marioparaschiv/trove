@@ -4,28 +4,27 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use half::{f16, slice::HalfFloatSliceExt};
+use half::f16;
 use memmap2::Mmap;
 use rusqlite::{Connection, Row};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use zerocopy::FromBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 /// The vector scan file in the data folder: a copy of every embedded chunk's vector, laid out for search to scan.
 pub const VECTOR_SCAN_FILE: &str = "vectors.scan";
 
 const MAGIC: &[u8; 8] = b"TROVEVEC";
 const FORMAT: u32 = 1;
-/// IEEE half floats, as the index stores them.
-const FP16: u32 = 1;
+/// One signed byte per value and one f32 scale per vector: half the bytes of the index's fp16 to scan. On the eval
+/// vault it ranks as fp16 does, but for four answers that move one place.
+const INT8: u32 = 2;
 const VECTOR_VERSION_LEN: usize = 64;
 const HEADER_LEN: usize = 128;
 
-/// Values converted from fp16 at a time, into a buffer on the stack.
-const BLOCK: usize = 256;
 /// Separate running sums, so the compiler can keep them in vector registers.
-const LANES: usize = 16;
+const LANES: usize = 32;
 
 const _: () = assert!(
     cfg!(target_endian = "little"),
@@ -70,7 +69,7 @@ pub enum VectorScanError {
 
 /// The header: what the rows are and which index state they were copied from. Little-endian, padded to `HEADER_LEN`:
 /// magic, format, precision, dimensions, 4 bytes unused, rows, `vector_version` (zero-padded), fingerprint. Then each
-/// row's vector, then each row's chunk id as an `i64`.
+/// row's vector as `i8`s, then each row's scale as an `f32`, then each row's chunk id as an `i64`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Header {
     precision: u32,
@@ -99,13 +98,13 @@ impl Header {
     fn parse(file: &[u8]) -> Option<Self> {
         let bytes = file.get(..HEADER_LEN)?;
         let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-        if &bytes[0..8] != MAGIC || u32_at(8) != FORMAT || u32_at(12) != FP16 {
+        if &bytes[0..8] != MAGIC || u32_at(8) != FORMAT || u32_at(12) != INT8 {
             return None;
         }
 
         let vector_version = &bytes[32..32 + VECTOR_VERSION_LEN];
         let header = Self {
-            precision: FP16,
+            precision: INT8,
             dims: u32_at(16),
             rows: u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
             vector_version: String::from_utf8(
@@ -126,8 +125,13 @@ impl Header {
     fn vectors_len(&self) -> Option<usize> {
         usize::try_from(self.rows)
             .ok()?
-            .checked_mul(self.dims as usize)?
-            .checked_mul(size_of::<f16>())
+            .checked_mul(self.dims as usize)
+    }
+
+    fn scales_len(&self) -> Option<usize> {
+        usize::try_from(self.rows)
+            .ok()?
+            .checked_mul(size_of::<f32>())
     }
 
     fn file_len(&self) -> Option<usize> {
@@ -137,12 +141,14 @@ impl Header {
 
         HEADER_LEN
             .checked_add(self.vectors_len()?)?
+            .checked_add(self.scales_len()?)?
             .checked_add(ids_len)
     }
 }
 
-/// The vector scan file, memory-mapped: every embedded chunk's fp16 vector in one flat block, one row per chunk in
-/// chunk id order, and the chunk ids. Derived from the index and written again whenever the index's vectors change.
+/// The vector scan file, memory-mapped: every embedded chunk's vector quantised to int8 in one flat block, one row per
+/// chunk in chunk id order, then each vector's scale and the chunk ids. Derived from the index and written again
+/// whenever the index's vectors change.
 pub(crate) struct VectorScan {
     header: Header,
     map: Mmap,
@@ -188,6 +194,7 @@ impl VectorScan {
         let mut rows = statement.query([])?;
         let mut fingerprint = Sha256::new();
         let mut ids = Vec::new();
+        let mut scales = Vec::new();
         let mut vector_len = None;
         while let Some(row) = rows.next()? {
             let chunk_id = add_to_fingerprint(&mut fingerprint, row)?;
@@ -201,15 +208,28 @@ impl VectorScan {
                 });
             }
 
-            writer.write_all(vector).map_err(write_error)?;
+            let values: Vec<f32> = vector
+                .chunks_exact(size_of::<f16>())
+                .map(|bytes| f16::from_le_bytes([bytes[0], bytes[1]]).to_f32())
+                .collect();
+            let (scale, quantised) = quantised(&values);
+            writer
+                .write_all(quantised.as_bytes())
+                .map_err(write_error)?;
+            scales.push(scale);
             ids.push(chunk_id);
+        }
+        for scale in &scales {
+            writer
+                .write_all(&scale.to_le_bytes())
+                .map_err(write_error)?;
         }
         for id in &ids {
             writer.write_all(&id.to_le_bytes()).map_err(write_error)?;
         }
 
         let header = Header {
-            precision: FP16,
+            precision: INT8,
             dims: (vector_len.unwrap_or(0) / size_of::<f16>()) as u32,
             rows: ids.len() as u64,
             vector_version: vector_version.to_owned(),
@@ -236,7 +256,8 @@ impl VectorScan {
         self.header.vector_version == vector_version && &self.header.fingerprint == fingerprint
     }
 
-    /// Each row's chunk id and dot product with `query`: the cosine similarity, both being unit vectors.
+    /// Each row's chunk id and dot product with `query`, quantised as the rows are: about the cosine similarity, both
+    /// being unit vectors.
     pub(crate) fn scores(&self, query: &[f32]) -> Result<Vec<(i64, f32)>, VectorScanError> {
         if self.header.rows == 0 {
             return Ok(Vec::new());
@@ -248,22 +269,23 @@ impl VectorScan {
                 query: query.len(),
             });
         }
+        let (query_scale, query) = quantised(query);
 
-        let (vectors, ids) = self.map[HEADER_LEN..].split_at(
-            self.header
-                .vectors_len()
-                .expect("checked when the file was read"),
-        );
-        let vectors = <[f16]>::ref_from_bytes(vectors)
-            .expect("a mapping starts on a page, and the header keeps the vectors aligned");
+        let checked = "checked when the file was read";
+        let (vectors, rest) =
+            self.map[HEADER_LEN..].split_at(self.header.vectors_len().expect(checked));
+        let (scales, ids) = rest.split_at(self.header.scales_len().expect(checked));
+        let vectors = <[i8]>::ref_from_bytes(vectors).expect("any bytes are i8s");
 
         Ok(ids
             .chunks_exact(size_of::<i64>())
+            .zip(scales.chunks_exact(size_of::<f32>()))
             .zip(vectors.chunks_exact(dims))
-            .map(|(id, vector)| {
+            .map(|((id, scale), vector)| {
+                let scale = f32::from_le_bytes(scale.try_into().unwrap()) * query_scale;
                 (
                     i64::from_le_bytes(id.try_into().unwrap()),
-                    dot(vector, query),
+                    dot(vector, &query) as f32 * scale,
                 )
             })
             .collect())
@@ -302,27 +324,113 @@ fn map(file: &File) -> io::Result<Mmap> {
     }
 }
 
-fn dot(stored: &[f16], query: &[f32]) -> f32 {
-    let mut converted = [0.0; BLOCK];
-    let mut sums = [0.0f32; LANES];
-    let mut rest = 0.0;
-    for (stored, query) in stored.chunks(BLOCK).zip(query.chunks(BLOCK)) {
-        let converted = &mut converted[..stored.len()];
-        stored.convert_to_f32_slice(converted);
-
-        let (converted, converted_rest) = converted.as_chunks::<LANES>();
-        let (query, query_rest) = query.as_chunks::<LANES>();
-        for (converted, query) in converted.iter().zip(query) {
-            for ((sum, stored), value) in sums.iter_mut().zip(converted).zip(query) {
-                *sum += stored * value;
-            }
-        }
-        rest += converted_rest
-            .iter()
-            .zip(query_rest)
-            .map(|(stored, value)| stored * value)
-            .sum::<f32>();
+/// `values` as int8 with one scale for all of them: each value is about the scale times its int8, the largest ±127.
+fn quantised(values: &[f32]) -> (f32, Vec<i8>) {
+    let largest = values
+        .iter()
+        .fold(0.0f32, |largest, value| largest.max(value.abs()));
+    if largest == 0.0 {
+        return (0.0, vec![0; values.len()]);
     }
 
-    sums.iter().sum::<f32>() + rest
+    let scale = largest / f32::from(i8::MAX);
+    (
+        scale,
+        values
+            .iter()
+            .map(|value| (value / scale).round() as i8)
+            .collect(),
+    )
+}
+
+/// The integer dot product. Each product is at most 127², so an `i32` holds the sum of far more dimensions than a
+/// model has.
+fn dot(stored: &[i8], query: &[i8]) -> i32 {
+    let (stored, stored_rest) = stored.as_chunks::<LANES>();
+    let (query, query_rest) = query.as_chunks::<LANES>();
+    let mut sums = [0i32; LANES];
+    for (stored, query) in stored.iter().zip(query) {
+        for ((sum, &stored), &value) in sums.iter_mut().zip(stored).zip(query) {
+            *sum += i32::from(stored) * i32::from(value);
+        }
+    }
+
+    sums.iter().sum::<i32>()
+        + stored_rest
+            .iter()
+            .zip(query_rest)
+            .map(|(&stored, &value)| i32::from(stored) * i32::from(value))
+            .sum::<i32>()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::{data_dir::DataDir, index::Index};
+
+    const DIMS: usize = 768;
+
+    /// The unit vector along `axis`, as the index stores it.
+    fn stored_axis(axis: usize) -> Vec<u8> {
+        (0..DIMS)
+            .flat_map(|at| f16::from_f32(if at == axis { 1.0 } else { 0.0 }).to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn a_file_of_another_precision_or_dimensions_is_written_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let data_dir = DataDir::at(temp.path().to_owned()).unwrap();
+        let mut index = Index::open(&data_dir).unwrap();
+        index
+            .connection()
+            .execute_batch(
+                "INSERT INTO sources (id, path) VALUES (1, '/vault');
+                 INSERT INTO files (id, source_id, path, mtime, hash, title, properties)
+                 VALUES (1, 1, 'Bread.md', 0, x'01', 'Bread', '{}');
+                 INSERT INTO chunks (id, file_id, ordinal, heading_path, span_start, span_end, text_hash, has_words)
+                 VALUES (1, 1, 0, '', 0, 9, x'01', 1), (2, 1, 1, '', 9, 18, x'02', 1);",
+            )
+            .unwrap();
+        for (text_hash, axis) in [([1u8], 0), ([2u8], 1)] {
+            index
+                .connection()
+                .execute(
+                    "INSERT INTO vectors (text_hash, vector) VALUES (?1, ?2)",
+                    (&text_hash[..], stored_axis(axis)),
+                )
+                .unwrap();
+        }
+
+        let mut query = vec![0.0; DIMS];
+        query[0] = 1.0;
+        let scores = index.chunk_scores(&query).unwrap();
+        assert_eq!(scores, [(1, 1.0), (2, 0.0)]);
+        drop(index);
+
+        let path = data_dir.path().join(VECTOR_SCAN_FILE);
+        let written = fs::read(&path).unwrap();
+        let header = Header::parse(&written).unwrap();
+        let stale_headers = [
+            Header {
+                precision: INT8 + 1,
+                ..header.clone()
+            },
+            Header {
+                dims: header.dims / 2,
+                ..header
+            },
+        ];
+        for stale in stale_headers {
+            let mut file = written.clone();
+            file[..HEADER_LEN].copy_from_slice(&stale.to_bytes());
+            fs::write(&path, &file).unwrap();
+
+            let mut index = Index::open(&data_dir).unwrap();
+            assert_eq!(index.chunk_scores(&query).unwrap(), scores);
+            assert_eq!(fs::read(&path).unwrap(), written);
+        }
+    }
 }
