@@ -1,3 +1,4 @@
+pub(crate) mod keyword_text;
 mod sources;
 mod stats;
 mod vector_scan;
@@ -20,9 +21,10 @@ pub use vector_scan::{VECTOR_SCAN_FILE, VectorScanError};
 pub(crate) use vectors::SectionVector;
 
 pub const INDEX_FILE: &str = "index.sqlite";
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 const SCHEMA: &str = include_str!("index/schema.sql");
+const CHUNKS_FTS: &str = include_str!("index/chunks_fts.sql");
 
 /// The local index: a rebuildable SQLite cache in the data folder.
 pub struct Index {
@@ -85,11 +87,13 @@ impl Index {
         match read_schema_version(&tx)? {
             None => {
                 tx.execute_batch(SCHEMA)?;
+                tx.execute_batch(CHUNKS_FTS)?;
                 tx.execute(
                     "INSERT INTO meta (key, value) VALUES ('schema_version', ?1), ('device_id', ?2)",
                     (SCHEMA_VERSION, uuid::Uuid::new_v4().to_string()),
                 )?;
             }
+            Some(1) => migrate_to_keyword_text(&tx)?,
             Some(SCHEMA_VERSION) => {}
             Some(found) => {
                 return Err(IndexError::UnsupportedSchema {
@@ -161,6 +165,31 @@ impl Index {
 pub fn lock(index: &Mutex<Index>) -> MutexGuard<'_, Index> {
     // A panic mid-query leaves the connection usable: SQLite rolls back the open transaction.
     index.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Schema 1 to 2: keyword search with DigUp's tokenizer over normalised text (`keyword_text`). The keyword table is
+/// made again from its own rows, so no note is read and no vector changes.
+fn migrate_to_keyword_text(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    let rows: Vec<(i64, String, String, String)> = tx
+        .prepare("SELECT rowid, title, heading_path, text FROM chunks_fts")?
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    tx.execute_batch("DROP TRIGGER chunks_fts_delete; DROP TABLE chunks_fts;")?;
+    tx.execute_batch(CHUNKS_FTS)?;
+    let mut insert = tx.prepare(keyword_text::INSERT)?;
+    for (chunk_id, title, heading_path, text) in rows {
+        keyword_text::insert(&mut insert, chunk_id, &title, &heading_path, &text)?;
+    }
+
+    tx.execute(
+        "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",
+        [SCHEMA_VERSION],
+    )?;
+
+    Ok(())
 }
 
 fn read_schema_version(conn: &Connection) -> rusqlite::Result<Option<u32>> {

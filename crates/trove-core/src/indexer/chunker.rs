@@ -4,7 +4,10 @@ use rusqlite::Transaction;
 use sha2::{Digest, Sha256};
 
 use super::{FileProcessor, IndexerError, NoteFile, frontmatter::Frontmatter};
-use crate::embedder::{CONTEXT_TOKENS, Embedder, Input};
+use crate::{
+    embedder::{CONTEXT_TOKENS, Embedder, Input},
+    index::keyword_text,
+};
 
 const HEADING_SEPARATOR: &str = " > ";
 
@@ -104,9 +107,7 @@ impl FileProcessor for Chunker {
             "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, token_count, text_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
-        let mut insert_fts = tx.prepare(
-            "INSERT INTO chunks_fts (rowid, title, heading_path, text) VALUES (?1, ?2, ?3, ?4)",
-        )?;
+        let mut insert_fts = tx.prepare(keyword_text::INSERT)?;
 
         let chunks = match note.stored_chunks {
             Some(stored) => stored
@@ -133,7 +134,13 @@ impl FileProcessor for Chunker {
                 chunk.token_count,
                 text_hash.as_slice(),
             ))?;
-            insert_fts.execute((chunk_id, note.title, &chunk.heading_path, text))?;
+            keyword_text::insert(
+                &mut insert_fts,
+                chunk_id,
+                note.title,
+                &chunk.heading_path,
+                text,
+            )?;
         }
 
         Ok(())

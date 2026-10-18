@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, sync::Mutex};
 
 use super::{Candidate, Query, SearchError, Signal, Stage};
-use crate::index::{self, Index};
+use crate::index::{self, Index, keyword_text};
 
 /// Search by words: full-text search with BM25 over each chunk's note title, heading path and text, Porter-stemmed.
 /// A chunk matches when it has every word of the query, so a word query never finds more than Obsidian's own search
@@ -22,7 +22,7 @@ impl Stage for Words<'_> {
         query: &Query,
         mut candidates: Vec<Candidate>,
     ) -> Result<Vec<Candidate>, SearchError> {
-        let Some(pattern) = fts_pattern(&query.text) else {
+        let Some(pattern) = fts_pattern(&keyword_text::normalized(&query.text)) else {
             return Ok(candidates);
         };
 

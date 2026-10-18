@@ -32,7 +32,7 @@ impl NoteTerms {
             add(row.get(0)?, row.get_ref(1)?.as_str()?);
         }
         let mut texts = conn.prepare(
-            "SELECT c.file_id, t.text FROM chunks c JOIN chunks_fts t ON t.rowid = c.id",
+            "SELECT c.file_id, coalesce(t.original, t.text) FROM chunks c JOIN chunks_fts t ON t.rowid = c.id",
         )?;
         let mut rows = texts.query([])?;
         while let Some(row) = rows.next()? {

@@ -39,6 +39,7 @@ tokio = { version = "1.53.3", features = ["macros", "net", "rt-multi-thread", "s
 tokio-util = "0.7.20"
 toml = "1.1.8"
 # ureq changes its `unversioned` transport API (used for the download idle timeout) only in minor releases.
+unicode-normalization = "0.1.26"
 ureq = { version = "~3.4.2", default-features = false, features = ["rustls"] }
 utoipa = "6.0.0"
 utoipa-axum = "0.3.0"

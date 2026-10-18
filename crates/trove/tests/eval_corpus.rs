@@ -13,7 +13,7 @@ use common::{EVAL_QUERIES, EVAL_VAULT, fixture_notes};
 use rusqlite::Connection;
 use serde::Deserialize;
 
-const INDEX_SCHEMA: &str = include_str!("../../trove-core/src/index/schema.sql");
+const CHUNKS_FTS: &str = include_str!("../../trove-core/src/index/chunks_fts.sql");
 
 /// A lookup query names a term that is in at most this many notes.
 const LOOKUP_MAX_NOTES: usize = 3;
@@ -101,13 +101,11 @@ impl Corpus {
 
 /// The `tokenize` option of the index's `chunks_fts` table, quoted as in the schema.
 fn index_tokenizer() -> &'static str {
-    let (_, table) = INDEX_SCHEMA
-        .split_once("CREATE VIRTUAL TABLE chunks_fts")
-        .expect("the schema creates chunks_fts");
-    let (_, option) = table
+    let (_, option) = CHUNKS_FTS
         .split_once("tokenize = ")
         .expect("chunks_fts names its tokenizer");
-    let end = option[1..].find('\'').expect("the tokenizer is quoted") + 2;
+    let quote = option.chars().next().expect("the tokenizer is quoted");
+    let end = option[1..].find(quote).expect("the tokenizer is quoted") + 2;
 
     &option[..end]
 }

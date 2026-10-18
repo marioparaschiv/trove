@@ -61,7 +61,7 @@ impl Index {
     pub(crate) fn unembedded_chunks(&self, limit: usize) -> rusqlite::Result<Vec<UnembeddedChunk>> {
         // With `min`, SQLite takes the bare columns from the row with the lowest id, so the choice is stable.
         let mut statement = self.conn.prepare(
-            "SELECT c.text_hash, f.title, c.heading_path, t.text, min(c.id)
+            "SELECT c.text_hash, f.title, c.heading_path, coalesce(t.original, t.text), min(c.id)
              FROM chunks c
              JOIN files f ON f.id = c.file_id
              JOIN chunks_fts t ON t.rowid = c.id

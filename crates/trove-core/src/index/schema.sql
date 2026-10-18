@@ -45,18 +45,6 @@ CREATE TABLE vectors (
     vector BLOB NOT NULL
 ) STRICT;
 
--- rowid is the chunk id.
-CREATE VIRTUAL TABLE chunks_fts USING fts5 (
-    title,
-    heading_path,
-    text,
-    tokenize = 'porter unicode61'
-);
-
-CREATE TRIGGER chunks_fts_delete AFTER DELETE ON chunks BEGIN
-    DELETE FROM chunks_fts WHERE rowid = old.id;
-END;
-
 -- src and dst are graph node keys (notes, sections, tags, categories).
 CREATE TABLE edges (
     src TEXT NOT NULL,
