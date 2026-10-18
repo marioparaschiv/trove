@@ -33,6 +33,24 @@ pub(crate) fn normalized(text: &str) -> String {
         .collect()
 }
 
+/// Whether text says something in words: at least a fifth of what isn't space is letters (marks count, such as vowel
+/// signs). A table of numbers or a data dump isn't, and gets keyword search only: a meaning vector of digits matches
+/// nothing anyone would describe. DigUp's rule.
+pub(crate) fn has_words(text: &str) -> bool {
+    let (letters, others) =
+        text.chars()
+            .filter(|c| !c.is_whitespace())
+            .fold((0, 0), |(letters, others), c| {
+                if c.is_alphabetic() || is_combining_mark(c) {
+                    (letters + 1, others)
+                } else {
+                    (letters, others + 1)
+                }
+            });
+
+    letters > 0 && letters * 4 >= others
+}
+
 /// Adds a chunk to keyword search, for [`insert`].
 pub(crate) const INSERT: &str = "INSERT INTO chunks_fts (rowid, title, heading_path, text, original) VALUES (?1, ?2, ?3, ?4, ?5)";
 
@@ -75,5 +93,16 @@ mod tests {
         assert_eq!(normalized("ﬁle"), "file");
         assert_eq!(normalized("co\u{00AD}operate\u{200D}"), "cooperate");
         assert_eq!(normalized("a\u{200B}b"), "a b");
+    }
+
+    #[test]
+    fn text_has_words_when_a_fifth_of_it_is_letters() {
+        assert!(has_words("Boiler pressure readings, 2024: 1.2 bar."));
+        assert!(has_words("हिन्दी"));
+        assert!(!has_words(
+            "| 1.2 | 1.4 | 1.3 |\n|-----|-----|-----|\n| 1.1 | 1.5 | 1.2 |"
+        ));
+        assert!(!has_words("4815162342 7730021894"));
+        assert!(!has_words(""));
     }
 }

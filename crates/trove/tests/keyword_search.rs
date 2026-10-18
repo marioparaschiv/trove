@@ -2,7 +2,7 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{indexed, result_paths, run, search, vault_copy};
+use common::{data_dir_with_model, indexed, path_str, result_paths, run, search, vault_copy};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -58,6 +58,27 @@ fn hindi_words_with_vowel_signs_match_a_query_typed_without_their_ending() {
 
     assert_eq!(word_matches(data_dir.path(), "पुस्तक"), ["Library.md"]);
     assert_eq!(word_matches(data_dir.path(), "लौटाईं"), ["Library.md"]);
+}
+
+#[test]
+fn a_chunk_of_digits_gets_no_vector_and_is_found_by_its_words() {
+    let vault = vault(&[(
+        "Meter readings.md",
+        "# Meter readings\n\nGas meter readings, taken on the first of each month.\n\n## 2024\n\n\
+         | 04815 | 04902 | 05011 |\n|-------|-------|-------|\n| 05187 | 05342 | 05420 |\n",
+    )]);
+    let data_dir = data_dir_with_model();
+    run(data_dir.path(), &["sources", "add", path_str(vault.path())]);
+
+    let report = run(data_dir.path(), &["index"]);
+    assert!(report.contains("embedded 1 chunks"), "{report}");
+
+    let response = search(data_dir.path(), "05342");
+    assert_eq!(result_paths(&response), ["Meter readings.md"], "{response}");
+    assert_eq!(
+        response["results"][0]["heading_path"],
+        json!(["Meter readings", "2024"])
+    );
 }
 
 #[test]

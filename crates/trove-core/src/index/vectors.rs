@@ -46,18 +46,18 @@ impl Index {
         Ok(changed)
     }
 
-    /// How many distinct chunk texts have no vector.
+    /// How many distinct chunk texts with words have no vector.
     pub(crate) fn unembedded_count(&self) -> rusqlite::Result<u64> {
         self.conn.query_row(
             "SELECT count(DISTINCT c.text_hash)
              FROM chunks c
-             WHERE NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
+             WHERE c.has_words AND NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
             [],
             |row| row.get(0),
         )
     }
 
-    /// Up to `limit` chunks whose text has no vector, one per distinct text.
+    /// Up to `limit` chunks whose text has words but no vector, one per distinct text.
     pub(crate) fn unembedded_chunks(&self, limit: usize) -> rusqlite::Result<Vec<UnembeddedChunk>> {
         // With `min`, SQLite takes the bare columns from the row with the lowest id, so the choice is stable.
         let mut statement = self.conn.prepare(
@@ -65,7 +65,7 @@ impl Index {
              FROM chunks c
              JOIN files f ON f.id = c.file_id
              JOIN chunks_fts t ON t.rowid = c.id
-             WHERE NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)
+             WHERE c.has_words AND NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)
              GROUP BY c.text_hash
              LIMIT ?1",
         )?;

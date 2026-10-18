@@ -25,6 +25,7 @@ CREATE TABLE files (
 -- span_start and span_end are byte offsets of the chunk text in the file.
 -- token_count is the length of the chunk's document prompt (title and text) in model tokens.
 -- text_hash is the SHA-256 of the chunk text and keys its vector.
+-- has_words is 0 for text that is mostly digits or symbols (keyword_text.rs), which gets no vector.
 CREATE TABLE chunks (
     id INTEGER PRIMARY KEY,
     file_id INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
@@ -34,6 +35,7 @@ CREATE TABLE chunks (
     span_end INTEGER NOT NULL,
     token_count INTEGER,
     text_hash BLOB NOT NULL,
+    has_words INTEGER NOT NULL,
     UNIQUE (file_id, ordinal)
 ) STRICT;
 

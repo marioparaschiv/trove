@@ -104,8 +104,8 @@ impl FileProcessor for Chunker {
         tx.execute("DELETE FROM chunks WHERE file_id = ?1", [note.id])?;
 
         let mut insert_chunk = tx.prepare(
-            "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, token_count, text_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, token_count, text_hash, has_words)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         let mut insert_fts = tx.prepare(keyword_text::INSERT)?;
 
@@ -133,6 +133,7 @@ impl FileProcessor for Chunker {
                 chunk.span.end,
                 chunk.token_count,
                 text_hash.as_slice(),
+                keyword_text::has_words(text),
             ))?;
             keyword_text::insert(
                 &mut insert_fts,

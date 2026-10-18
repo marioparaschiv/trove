@@ -167,8 +167,9 @@ pub fn lock(index: &Mutex<Index>) -> MutexGuard<'_, Index> {
     index.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Schema 1 to 2: keyword search with DigUp's tokenizer over normalised text (`keyword_text`). The keyword table is
-/// made again from its own rows, so no note is read and no vector changes.
+/// Schema 1 to 2: keyword search with DigUp's tokenizer over normalised text (`keyword_text`), and chunks of mostly
+/// digits or symbols marked and without a vector. The keyword table is made again from its own rows, so no note is
+/// read and no other vector changes.
 fn migrate_to_keyword_text(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     let rows: Vec<(i64, String, String, String)> = tx
         .prepare("SELECT rowid, title, heading_path, text FROM chunks_fts")?
@@ -177,12 +178,25 @@ fn migrate_to_keyword_text(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         })?
         .collect::<rusqlite::Result<_>>()?;
 
-    tx.execute_batch("DROP TRIGGER chunks_fts_delete; DROP TABLE chunks_fts;")?;
+    tx.execute_batch(
+        "DROP TRIGGER chunks_fts_delete;
+         DROP TABLE chunks_fts;
+         ALTER TABLE chunks ADD COLUMN has_words INTEGER NOT NULL DEFAULT 1;",
+    )?;
     tx.execute_batch(CHUNKS_FTS)?;
     let mut insert = tx.prepare(keyword_text::INSERT)?;
+    let mut mark_wordless = tx.prepare("UPDATE chunks SET has_words = 0 WHERE id = ?1")?;
     for (chunk_id, title, heading_path, text) in rows {
         keyword_text::insert(&mut insert, chunk_id, &title, &heading_path, &text)?;
+        if !keyword_text::has_words(&text) {
+            mark_wordless.execute([chunk_id])?;
+        }
     }
+    // Chunks with the same text hash have the same text.
+    tx.execute(
+        "DELETE FROM vectors WHERE text_hash IN (SELECT text_hash FROM chunks WHERE NOT has_words)",
+        [],
+    )?;
 
     tx.execute(
         "UPDATE meta SET value = ?1 WHERE key = 'schema_version'",

@@ -156,7 +156,7 @@ fn notes_to_store(index: &Index, written: &[i64]) -> rusqlite::Result<Vec<i64>> 
         "SELECT value FROM json_each(?1)
          UNION
          SELECT c.file_id FROM chunks c
-         WHERE NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
+         WHERE c.has_words AND NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
     )?;
 
     statement.query_map([written], |row| row.get(0))?.collect()

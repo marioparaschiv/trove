@@ -113,8 +113,8 @@ mod tests {
         INSERT INTO sources (id, path) VALUES (1, '/vault');
         INSERT INTO files (id, source_id, path, mtime, hash, title, properties)
         VALUES (1, 1, 'Bread.md', 0, x'01', 'Bread', '{}'), (2, 1, 'Flour.md', 0, x'02', 'Flour', '{}');
-        INSERT INTO chunks (id, file_id, ordinal, heading_path, span_start, span_end, text_hash)
-        VALUES (1, 1, 0, '', 0, 9, x'01'), (2, 2, 0, '', 0, 5, x'02');
+        INSERT INTO chunks (id, file_id, ordinal, heading_path, span_start, span_end, text_hash, has_words)
+        VALUES (1, 1, 0, '', 0, 9, x'01', 1), (2, 2, 0, '', 0, 5, x'02', 1);
         INSERT INTO chunks_fts (rowid, title, heading_path, text)
         VALUES (1, 'Bread', '', 'sourdough'), (2, 'Flour', '', 'flour');
         INSERT INTO edges (src, dst, kind, weight) VALUES ('note:1', 'link:Flour', 'link', 1.0);
