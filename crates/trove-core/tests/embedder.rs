@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use trove_core::{
-    embedder::{Embedder, Input, LLAMA_CPP_TAG, ModelEvent, vector_version},
+    embedder::{Embedder, Input, LLAMA_CPP_TAG, ModelEvent, Profile, vector_version},
     model_setup::{MODEL_FILE, MODEL_REPO, MODEL_REVISION, MODEL_SHA256, ModelFile, hf_hub_cache},
 };
 
@@ -86,10 +86,13 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-fn reference_vectors(embedder: &Embedder) -> BTreeMap<String, Vec<f32>> {
+fn reference_vectors(embedder: &Embedder, profile: Profile) -> BTreeMap<String, Vec<f32>> {
     let inputs = reference_inputs();
     let made = embedder
-        .embed(&inputs.iter().map(|(_, input)| *input).collect::<Vec<_>>())
+        .embed(
+            &inputs.iter().map(|(_, input)| *input).collect::<Vec<_>>(),
+            profile,
+        )
         .unwrap();
 
     inputs
@@ -103,7 +106,7 @@ fn reference_vectors(embedder: &Embedder) -> BTreeMap<String, Vec<f32>> {
 /// `TROVE_WRITE_REFERENCE=1 cargo test -p trove-core --test embedder`.
 #[test]
 fn fixed_texts_match_the_committed_reference_vectors() {
-    let made = reference_vectors(&EMBEDDER);
+    let made = reference_vectors(&EMBEDDER, Profile::Foreground);
     let version = vector_version(MODEL_SHA256);
     let stored: Option<Reference> = fs::read_to_string(REFERENCE_FILE)
         .ok()
@@ -155,32 +158,60 @@ fn fixed_texts_match_the_committed_reference_vectors() {
     }
 }
 
-/// Metal and CPU vectors share one index only while they agree; otherwise the backend has to go into `vector_version`.
-#[cfg(target_os = "macos")]
+/// GPU (Metal, Vulkan) and CPU vectors share one index only while they agree; otherwise the backend has to go into
+/// `vector_version`. Every Mac has Metal; elsewhere this needs a Vulkan driver and checks nothing without one.
 #[test]
-fn metal_and_cpu_vectors_for_the_reference_texts_agree() {
+fn gpu_and_cpu_vectors_for_the_reference_texts_agree() {
     use trove_core::embedder::{Devices, has_gpu};
 
-    assert!(has_gpu().unwrap(), "llama.cpp found no Metal device");
-    let metal = reference_vectors(&EMBEDDER);
-    let cpu = reference_vectors(&Embedder::on_devices(
-        model_path(),
-        Duration::from_secs(180),
-        Devices::Cpu,
-    ));
+    let has_gpu = has_gpu().unwrap();
+    if cfg!(target_os = "macos") {
+        assert!(has_gpu, "llama.cpp found no Metal device");
+    }
+    if !has_gpu {
+        return;
+    }
 
-    for (name, vector) in &metal {
+    let gpu = reference_vectors(&EMBEDDER, Profile::Foreground);
+    let cpu = reference_vectors(
+        &Embedder::on_devices(model_path(), Duration::from_secs(180), Devices::Cpu),
+        Profile::Foreground,
+    );
+
+    for (name, vector) in &gpu {
         let similarity = cosine(vector, &cpu[name]);
         assert!(
             similarity >= AGREEMENT,
-            "{name}: Metal and CPU vectors at cosine {similarity}"
+            "{name}: GPU and CPU vectors at cosine {similarity}"
         );
+    }
+}
+
+/// A background run and the searches around it share one loaded model; each call takes its own profile.
+#[test]
+fn background_and_foreground_calls_on_one_model_make_the_same_vectors() {
+    let embedder = Embedder::new(model_path(), Duration::from_secs(180));
+    let foreground = reference_vectors(&embedder, Profile::Foreground);
+    let background = reference_vectors(&embedder, Profile::Background);
+    let foreground_after = reference_vectors(&embedder, Profile::Foreground);
+
+    for (name, vector) in &foreground {
+        for (other, vectors) in [
+            ("background", &background),
+            ("later foreground", &foreground_after),
+        ] {
+            let similarity = cosine(vector, &vectors[name]);
+            assert!(
+                similarity >= AGREEMENT,
+                "{name}: foreground and {other} vectors at cosine {similarity}"
+            );
+        }
     }
 }
 
 #[test]
 fn vectors_are_unit_length() {
-    for (name, vector) in reference_vectors(&EMBEDDER) {
+    for (name, vector) in reference_vectors(&EMBEDDER, Profile::Foreground) {
         assert_eq!(vector.len(), DIMS, "{name}");
         let norm = cosine(&vector, &vector).sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "{name}: norm {norm}");
@@ -190,19 +221,22 @@ fn vectors_are_unit_length() {
 #[test]
 fn a_query_scores_higher_against_its_matching_document_than_an_unrelated_one() {
     let vectors = EMBEDDER
-        .embed(&[
-            Input::Query("how long to wait between retries when a request fails"),
-            Input::Document {
-                title: "Networking\nRetry backoff",
-                text: "After a failed call, wait 2 seconds, then 4, then 8, doubling up to a minute, and add jitter \
-                       so that clients don't all come back at the same moment.",
-            },
-            Input::Document {
-                title: "Recipes\nSourdough",
-                text: "Feed the starter the night before, mix flour and water, rest for an hour, then fold the dough \
-                       every 30 minutes and bake in a hot Dutch oven.",
-            },
-        ])
+        .embed(
+            &[
+                Input::Query("how long to wait between retries when a request fails"),
+                Input::Document {
+                    title: "Networking\nRetry backoff",
+                    text: "After a failed call, wait 2 seconds, then 4, then 8, doubling up to a minute, and add \
+                           jitter so that clients don't all come back at the same moment.",
+                },
+                Input::Document {
+                    title: "Recipes\nSourdough",
+                    text: "Feed the starter the night before, mix flour and water, rest for an hour, then fold the \
+                           dough every 30 minutes and bake in a hot Dutch oven.",
+                },
+            ],
+            Profile::Foreground,
+        )
         .unwrap();
 
     let matching = cosine(&vectors[0], &vectors[1]);
@@ -225,12 +259,16 @@ fn the_model_unloads_after_the_idle_timeout_and_the_next_call_loads_it_again() {
     let events = embedder.subscribe();
     assert!(!embedder.is_loaded());
 
-    embedder.embed(&[Input::Query("first")]).unwrap();
+    embedder
+        .embed(&[Input::Query("first")], Profile::Foreground)
+        .unwrap();
     assert_eq!(next_event(&events), ModelEvent::Loaded);
     assert_eq!(next_event(&events), ModelEvent::Unloaded);
     assert!(!embedder.is_loaded());
 
-    let vector = embedder.embed(&[Input::Query("second")]).unwrap();
+    let vector = embedder
+        .embed(&[Input::Query("second")], Profile::Foreground)
+        .unwrap();
     assert_eq!(vector.len(), 1);
     assert_eq!(next_event(&events), ModelEvent::Loaded);
 }
@@ -259,7 +297,12 @@ fn a_repeated_query_gets_the_vector_the_model_made_the_first_time() {
     let again = EMBEDDER.embed_query(query).unwrap();
 
     assert!(Arc::ptr_eq(&first, &again));
-    assert_eq!(*first, *EMBEDDER.embed(&[Input::Query(query)]).unwrap()[0]);
+    assert_eq!(
+        *first,
+        *EMBEDDER
+            .embed(&[Input::Query(query)], Profile::Foreground)
+            .unwrap()[0]
+    );
 }
 
 #[test]

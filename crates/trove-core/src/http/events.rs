@@ -11,15 +11,20 @@ use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use super::{AppState, openapi::Rejected};
-use crate::indexer::{IndexMode, IndexReport};
+use crate::{
+    embedder::Profile,
+    indexer::{IndexMode, IndexReport},
+};
 
 /// One server-sent event. The `data` of each event is this object as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    /// An index run started: from the watcher, on start, or through `POST /index`. Runs never overlap.
+    /// An index run started: from the watcher or on start, which embed in the background, or through `POST /index`,
+    /// which embeds in the foreground. Runs never overlap.
     IndexStarted {
         mode: IndexMode,
+        profile: Profile,
     },
     /// Chunk texts embedded so far out of those the run has to embed, sent after each batch.
     IndexProgress {

@@ -1,4 +1,7 @@
-use trove_core::{http::Status, index::Index};
+use trove_core::{
+    http::{ModelStatus, Status},
+    index::Index,
+};
 
 use super::Context;
 use crate::service::Service;
@@ -7,7 +10,7 @@ use crate::service::Service;
 pub struct Args {}
 
 pub fn run(ctx: &Context, _args: Args) -> anyhow::Result<()> {
-    let (stats, loaded) = match Service::connect(&ctx.data_dir)? {
+    let (stats, model) = match Service::connect(&ctx.data_dir)? {
         Some(service) => {
             let status: Status = service.get("/status")?;
             println!(
@@ -16,18 +19,26 @@ pub fn run(ctx: &Context, _args: Args) -> anyhow::Result<()> {
                 service.runtime().port
             );
 
-            (status.index, status.model.loaded)
+            (status.index, status.model)
         }
         None => {
             println!("service: not running");
 
             // Only a service keeps the model loaded.
-            (Index::open(&ctx.data_dir)?.stats()?, false)
+            let model = ModelStatus {
+                loaded: false,
+                device: None,
+            };
+            (Index::open(&ctx.data_dir)?.stats()?, model)
         }
     };
 
     println!("index: {} files, {} chunks", stats.files, stats.chunks);
-    println!("model: {}", if loaded { "loaded" } else { "not loaded" });
+    match (model.loaded, model.device) {
+        (true, Some(device)) => println!("model: loaded on {device}"),
+        (true, None) => println!("model: loaded"),
+        (false, _) => println!("model: not loaded"),
+    }
 
     Ok(())
 }

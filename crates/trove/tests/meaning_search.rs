@@ -240,15 +240,53 @@ fn prewarm_loads_the_model_and_unload_frees_it() {
     let model_loaded = || serve.call("GET", "/status", None).1["model"]["loaded"].clone();
     assert_eq!(model_loaded(), false);
 
-    assert_eq!(
-        serve.call("POST", "/prewarm", None),
-        (200, json!({ "loaded": true }))
-    );
+    let (status, model) = serve.call("POST", "/prewarm", None);
+    assert_eq!((status, &model["loaded"]), (200, &json!(true)), "{model}");
+    let device = model["device"].as_str().unwrap();
     assert_eq!(model_loaded(), true);
-    assert!(run(serve.data_dir.path(), &["status"]).ends_with("model: loaded\n"));
+    assert!(
+        run(serve.data_dir.path(), &["status"]).ends_with(&format!("model: loaded on {device}\n"))
+    );
 
     assert_eq!(run(serve.data_dir.path(), &["unload"]), "model unloaded\n");
     assert_eq!(model_loaded(), false);
+
+    serve.stop();
+}
+
+/// Points the Vulkan loader at no driver, as on a machine without a GPU driver.
+#[cfg(not(target_os = "macos"))]
+const NO_VULKAN_DRIVER: [(&str, &str); 2] = [
+    ("VK_DRIVER_FILES", "/no-vulkan-driver.json"),
+    ("VK_ICD_FILENAMES", "/no-vulkan-driver.json"),
+];
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn without_a_vulkan_driver_the_model_runs_on_the_cpu_and_finds_what_the_default_device_finds() {
+    let vault = vault_copy();
+    let default = indexed(vault.path());
+
+    let cpu = data_dir_with_model();
+    run(cpu.path(), &["sources", "add", path_str(vault.path())]);
+    let serve = Serve::start_with_env(cpu, &NO_VULKAN_DRIVER);
+    let (status, model) = serve.call("POST", "/prewarm", None);
+    assert_eq!(
+        (status, model),
+        (200, json!({ "loaded": true, "device": "CPU" }))
+    );
+    run(serve.data_dir.path(), &["index"]);
+
+    for paraphrase in &PARAPHRASES {
+        let on_cpu = serve.search(paraphrase.query);
+        assert_found_first(&on_cpu, paraphrase);
+        assert_eq!(
+            result_paths(&on_cpu),
+            result_paths(&search(default.path(), paraphrase.query)),
+            "{}",
+            paraphrase.query
+        );
+    }
 
     serve.stop();
 }

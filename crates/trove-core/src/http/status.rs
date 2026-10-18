@@ -34,9 +34,9 @@ pub struct Status {
 pub(super) async fn status(State(state): State<Arc<AppState>>) -> Result<Json<Status>, ApiError> {
     let blocking_state = Arc::clone(&state);
     // Both wait while indexing or a search holds the index or the model.
-    let (stats, loaded) = tokio::task::spawn_blocking(move || {
+    let (stats, model) = tokio::task::spawn_blocking(move || {
         let stats = index::lock(&blocking_state.index).stats();
-        (stats, blocking_state.embedder.is_loaded())
+        (stats, ModelStatus::of(&blocking_state.embedder))
     })
     .await
     .map_err(|error| ApiError::internal(&error))?;
@@ -46,7 +46,7 @@ pub(super) async fn status(State(state): State<Arc<AppState>>) -> Result<Json<St
         version: state.runtime.version.clone(),
         pid: state.runtime.pid,
         index: stats,
-        model: ModelStatus { loaded },
+        model,
         indexing: state.indexing.status(),
     }))
 }

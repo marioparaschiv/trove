@@ -211,7 +211,13 @@ impl Serve {
 
     /// Starts `trove serve` on `data_dir` and returns once it reports that it listens.
     pub fn start_in(data_dir: TempDir) -> Self {
+        Self::start_with_env(data_dir, &[])
+    }
+
+    /// Starts `trove serve` on `data_dir` with `env` added to its environment.
+    pub fn start_with_env(data_dir: TempDir, env: &[(&str, &str)]) -> Self {
         let mut child = trove(data_dir.path())
+            .envs(env.iter().copied())
             .arg("serve")
             .stdout(Stdio::piped())
             .spawn()

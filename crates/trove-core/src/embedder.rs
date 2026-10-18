@@ -1,14 +1,16 @@
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, mpsc},
+    sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use trove_llama::{EmbeddingModel, LlamaError};
+use trove_llama::{EmbeddingModel, LlamaError, Priority};
+use utoipa::ToSchema;
 
 pub use trove_llama::{Devices, LLAMA_CPP_TAG, has_gpu};
 
@@ -43,6 +45,26 @@ impl Input<'_> {
                 let title = if title.is_empty() { NO_TITLE } else { title };
                 format!("{DOCUMENT_TITLE_PREFIX}{title}{DOCUMENT_TEXT_PREFIX}{text}")
             }
+        }
+    }
+}
+
+/// Who an embedding call is for, which sets how much of the CPU it takes. Vectors are the same either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    /// Someone is waiting: a search, `trove index` or `POST /index`. Full speed.
+    Foreground,
+    /// Work the service started on its own, on start or for changed notes: fewer threads at below-normal priority, so
+    /// it yields to whatever the user is doing.
+    Background,
+}
+
+impl Profile {
+    fn priority(self) -> Priority {
+        match self {
+            Self::Foreground => Priority::Normal,
+            Self::Background => Priority::Low,
         }
     }
 }
@@ -86,6 +108,8 @@ pub struct Embedder {
 struct Shared {
     model_path: PathBuf,
     devices: Devices,
+    // The same on every load: the devices and the backends llama.cpp found don't change while the process runs.
+    device: OnceLock<String>,
     idle_timeout: Duration,
     state: Mutex<State>,
     state_changed: Condvar,
@@ -116,6 +140,7 @@ impl Embedder {
             shared: Arc::new(Shared {
                 model_path,
                 devices,
+                device: OnceLock::new(),
                 idle_timeout,
                 state: Mutex::new(State {
                     model: None,
@@ -136,7 +161,11 @@ impl Embedder {
     }
 
     /// One unit-length vector per input, in order.
-    pub fn embed(&self, inputs: &[Input<'_>]) -> Result<Vec<Vec<f32>>, EmbedderError> {
+    pub fn embed(
+        &self,
+        inputs: &[Input<'_>],
+        profile: Profile,
+    ) -> Result<Vec<Vec<f32>>, EmbedderError> {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
@@ -149,7 +178,7 @@ impl Embedder {
             .model
             .as_mut()
             .expect("loaded_state returns a loaded model");
-        let vectors = model.embed(&texts)?;
+        let vectors = model.embed(&texts, profile.priority())?;
         state.last_used = Instant::now();
 
         Ok(vectors)
@@ -167,7 +196,10 @@ impl Embedder {
             .as_mut()
             .expect("loaded_state returns a loaded model");
         let vector: Arc<[f32]> = model
-            .embed(&[&Input::Query(text).prompt()])?
+            .embed(
+                &[&Input::Query(text).prompt()],
+                Profile::Foreground.priority(),
+            )?
             .pop()
             .expect("one vector per input")
             .into();
@@ -207,6 +239,11 @@ impl Embedder {
             // `/status` for a whole batch.
             Err(TryLockError::WouldBlock) => true,
         }
+    }
+
+    /// What the model runs on, as `EmbeddingModel::device` names it, once it has been loaded.
+    pub fn device(&self) -> Option<&str> {
+        self.shared.device.get().map(String::as_str)
     }
 
     /// Receives every later load and unload.
@@ -261,11 +298,9 @@ impl Shared {
             return Ok(state);
         }
 
-        state.model = Some(EmbeddingModel::load(
-            &self.model_path,
-            CONTEXT_TOKENS,
-            self.devices,
-        )?);
+        let model = EmbeddingModel::load(&self.model_path, CONTEXT_TOKENS, self.devices)?;
+        self.device.get_or_init(|| model.device().to_owned());
+        state.model = Some(model);
         state.generation += 1;
         let generation = state.generation;
         let shared = Arc::clone(self);

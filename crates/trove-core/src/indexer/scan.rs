@@ -19,7 +19,7 @@ use super::{
 };
 use crate::{
     config::Config,
-    embedder::{Embedder, vector_version},
+    embedder::{Embedder, Profile, vector_version},
     error::full_message,
     index::{self, Index, IndexError, Source},
     sync_store::{SyncStore, VectorFile},
@@ -84,12 +84,13 @@ struct Stored {
 /// Chunks the notes `mode` picks in every source, drops notes that are gone and the vectors no chunk uses any more,
 /// then embeds the chunk texts that have no vector and writes the vector files of the notes that changed to the sync
 /// store. A note whose vector file matches it takes its chunks and vectors from there, without the model. The index is
-/// locked one note or one batch at a time, so searches go on meanwhile.
+/// locked one note or one batch at a time, so searches go on meanwhile. Chunk texts are embedded at `profile`.
 pub fn index_sources(
     index: &Mutex<Index>,
     embedder: &Arc<Embedder>,
     config: &Config,
     mode: IndexMode,
+    profile: Profile,
     progress: &mut dyn FnMut(EmbedProgress),
 ) -> Result<IndexReport, IndexerError> {
     let vector_version = vector_version(&config.model.sha256);
@@ -133,7 +134,7 @@ pub fn index_sources(
         )?;
         notes_to_store(&index, &written)?
     };
-    report.embedded = embed_missing(index, embedder, progress)?;
+    report.embedded = embed_missing(index, embedder, profile, progress)?;
     write_vector_files(
         index,
         &config.store_folder,

@@ -5,6 +5,7 @@
 
 use std::{
     ffi::{CStr, CString, c_char, c_void},
+    io, panic,
     path::{Path, PathBuf},
     ptr::NonNull,
     sync::{
@@ -31,10 +32,12 @@ use bindings::*;
 /// The llama.cpp release this crate builds.
 pub const LLAMA_CPP_TAG: &str = env!("TROVE_LLAMA_CPP_TAG");
 
-const MAX_SEQUENCES: usize = 16;
-
 // More threads than this get slower on hybrid CPUs whose slow cores hold the fast ones back (DigUp's measurements).
 const MAX_THREADS: usize = 8;
+
+// The usual `nice` step: a background embedding still gets the CPU, but the user's programs get it first.
+#[cfg(target_os = "linux")]
+const BACKGROUND_NICE: i32 = 10;
 
 #[derive(Debug, Error)]
 pub enum LlamaError {
@@ -52,12 +55,38 @@ pub enum LlamaError {
     Encode(i32),
     #[error("llama.cpp returned no pooled embedding for input {0}")]
     MissingEmbedding(usize),
+    #[error("llama.cpp's CPU backend has no thread pools")]
+    NoThreadpool,
+    #[error("llama.cpp failed to start a thread pool")]
+    CreateThreadpool,
+    #[error("failed to lower the priority of the embedding thread")]
+    LowerPriority(#[source] io::Error),
+}
+
+/// How an embedding call shares the CPU with the rest of the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Priority {
+    /// Up to 8 threads at normal priority.
+    Normal,
+    /// A quarter of the cores, at most 4 threads, at below-normal OS priority.
+    Low,
+}
+
+impl Priority {
+    fn threads(self) -> usize {
+        let cores = thread::available_parallelism().map_or(1, |count| count.get());
+        match self {
+            Self::Normal => cores.min(MAX_THREADS),
+            Self::Low => (cores / 4).clamp(1, MAX_THREADS / 2),
+        }
+    }
 }
 
 /// The devices llama.cpp may run a model on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Devices {
-    /// llama.cpp's own choice: every GPU it found (Metal on macOS), else the CPU.
+    /// The first GPU llama.cpp found (Metal on macOS, Vulkan elsewhere), a discrete one before an integrated one, else
+    /// the CPU.
     Default,
     /// The CPU only, even when a GPU is present.
     Cpu,
@@ -71,6 +100,10 @@ pub struct EmbeddingModel {
     vocab: *const llama_vocab,
     max_tokens: usize,
     dims: usize,
+    device: String,
+    /// Started by the first low-priority call. ggml's CPU backend keeps a detached pool until its next graph, so the
+    /// pool lives as long as the context.
+    low_priority_pool: Option<Threadpool>,
 }
 
 // SAFETY: the model, context and batch are owned by this value and only used through `&mut self`, so one thread at a
@@ -90,27 +123,26 @@ impl EmbeddingModel {
 
         // SAFETY: plain value struct from llama.cpp's defaults.
         let mut model_params = unsafe { llama_model_default_params() };
-        // An empty device list leaves llama.cpp no GPU to pick. It copies the list while loading.
-        let mut no_devices: [ggml_backend_dev_t; 1] = [std::ptr::null_mut()];
-        if devices == Devices::Cpu {
-            model_params.devices = no_devices.as_mut_ptr();
-        }
+        let gpu = match devices {
+            Devices::Default => first_gpu(),
+            Devices::Cpu => None,
+        };
+        // A null-terminated list of the one GPU, or empty, which leaves llama.cpp only the CPU. It copies the list
+        // while loading.
+        let mut device_list = [gpu.unwrap_or(std::ptr::null_mut()), std::ptr::null_mut()];
+        model_params.devices = device_list.as_mut_ptr();
 
-        // SAFETY: `c_path` is a valid NUL-terminated string and `no_devices` outlives the call.
+        // SAFETY: `c_path` is a valid NUL-terminated string and `device_list` outlives the call.
         let model =
             NonNull::new(unsafe { llama_model_load_from_file(c_path.as_ptr(), model_params) })
                 .ok_or_else(|| LlamaError::LoadModel(path.to_path_buf()))?;
 
-        let threads =
-            thread::available_parallelism().map_or(1, |count| count.get().min(MAX_THREADS)) as i32;
+        let threads = Priority::Normal.threads() as i32;
         // SAFETY: plain value struct from llama.cpp's defaults.
         let mut params = unsafe { llama_context_default_params() };
         params.n_ctx = max_tokens;
         params.n_batch = max_tokens;
         params.n_ubatch = max_tokens;
-        params.n_seq_max = MAX_SEQUENCES as u32;
-        // Each input may use the whole context.
-        params.kv_unified = true;
         params.embeddings = true;
         params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
         params.n_threads = threads;
@@ -140,33 +172,74 @@ impl EmbeddingModel {
             vocab,
             max_tokens: max_tokens as usize,
             dims,
+            device: gpu.map_or_else(|| "CPU".to_owned(), device_description),
+            low_priority_pool: None,
         })
     }
 
-    /// One unit-length vector per text, in order. A text longer than the context is cut, keeping its end-of-sequence
-    /// token, as the reference implementation (transformers) cuts it.
-    pub fn embed(&mut self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlamaError> {
-        let mut vectors = Vec::with_capacity(texts.len());
-        let mut pending: Vec<Vec<llama_token>> = Vec::new();
-        let mut pending_tokens = 0;
+    /// What the model runs on: the GPU's description from its driver, or `CPU`.
+    pub fn device(&self) -> &str {
+        &self.device
+    }
 
-        for (index, text) in texts.iter().enumerate() {
-            let tokens = self.tokenize(index, text)?;
-            if pending.len() == MAX_SEQUENCES || pending_tokens + tokens.len() > self.max_tokens {
-                vectors.extend(self.encode(&pending, vectors.len())?);
-                pending.clear();
-                pending_tokens = 0;
+    /// One unit-length vector per text, in order, computed at `priority`, which changes nothing in the vectors. A text
+    /// longer than the context is cut, keeping its end-of-sequence token, as the reference implementation
+    /// (transformers) cuts it.
+    pub fn embed(
+        &mut self,
+        texts: &[&str],
+        priority: Priority,
+    ) -> Result<Vec<Vec<f32>>, LlamaError> {
+        let threads = priority.threads() as i32;
+        // SAFETY: the context is live.
+        unsafe { llama_set_n_threads(self.context.as_ptr(), threads, threads) };
+
+        match priority {
+            Priority::Normal => {
+                // SAFETY: the context is live. Without a pool, ggml starts the workers of each graph from this thread.
+                unsafe { llama_detach_threadpool(self.context.as_ptr()) };
+                self.embed_all(texts)
             }
-
-            pending_tokens += tokens.len();
-            pending.push(tokens);
+            // On a thread of its own, which takes the lowered priority with it when it ends.
+            Priority::Low => thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        lower_this_thread()?;
+                        let pool = match &self.low_priority_pool {
+                            Some(pool) => pool.pool,
+                            None => {
+                                self.low_priority_pool
+                                    .insert(Threadpool::low_priority(threads)?)
+                                    .pool
+                            }
+                        };
+                        // SAFETY: both are live, and the pool outlives the context.
+                        unsafe {
+                            llama_attach_threadpool(
+                                self.context.as_ptr(),
+                                pool.as_ptr(),
+                                std::ptr::null_mut(),
+                            );
+                        }
+                        self.embed_all(texts)
+                    })
+                    .join()
+                    .unwrap_or_else(|payload| panic::resume_unwind(payload))
+            }),
         }
+    }
 
-        if !pending.is_empty() {
-            vectors.extend(self.encode(&pending, vectors.len())?);
-        }
-
-        Ok(vectors)
+    // One text per batch: llama.cpp's numbers for a sequence change with what else shares its batch, and a note's
+    // vectors must not depend on which other notes were embedded with it.
+    fn embed_all(&mut self, texts: &[&str]) -> Result<Vec<Vec<f32>>, LlamaError> {
+        texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| {
+                let tokens = self.tokenize(index, text)?;
+                self.encode(&tokens, index)
+            })
+            .collect()
     }
 
     /// How many tokens `text` takes, special tokens included, before any cut to the context.
@@ -215,62 +288,152 @@ impl EmbeddingModel {
         }
     }
 
-    /// Encodes the inputs as one batch, one sequence each. `first_index` numbers them in errors.
-    fn encode(
-        &mut self,
-        inputs: &[Vec<llama_token>],
-        first_index: usize,
-    ) -> Result<Vec<Vec<f32>>, LlamaError> {
-        let mut slot = 0;
-        for (sequence, tokens) in inputs.iter().enumerate() {
-            for (position, &token) in tokens.iter().enumerate() {
-                // SAFETY: the batch was allocated for `max_tokens` tokens with one sequence id each, and `embed` never
-                // puts more than `max_tokens` tokens in one batch.
-                unsafe {
-                    *self.batch.token.add(slot) = token;
-                    *self.batch.pos.add(slot) = position as llama_pos;
-                    *self.batch.n_seq_id.add(slot) = 1;
-                    **self.batch.seq_id.add(slot) = sequence as llama_seq_id;
-                    *self.batch.logits.add(slot) = 1;
-                }
-                slot += 1;
+    /// Encodes one input as a batch of its own. `index` numbers it in errors.
+    fn encode(&mut self, tokens: &[llama_token], index: usize) -> Result<Vec<f32>, LlamaError> {
+        for (position, &token) in tokens.iter().enumerate() {
+            // SAFETY: the batch was allocated for `max_tokens` tokens with one sequence id each, and `tokenize` never
+            // returns more than `max_tokens` tokens.
+            unsafe {
+                *self.batch.token.add(position) = token;
+                *self.batch.pos.add(position) = position as llama_pos;
+                *self.batch.n_seq_id.add(position) = 1;
+                **self.batch.seq_id.add(position) = 0;
+                *self.batch.logits.add(position) = 1;
             }
         }
-        self.batch.n_tokens = slot as i32;
+        self.batch.n_tokens = tokens.len() as i32;
 
-        // SAFETY: the context is live and the batch holds `slot` initialised tokens.
+        // SAFETY: the context is live and the batch holds `tokens.len()` initialised tokens.
         let status = unsafe { llama_encode(self.context.as_ptr(), self.batch) };
         if status != 0 {
             return Err(LlamaError::Encode(status));
         }
 
-        (0..inputs.len())
-            .map(|sequence| {
-                // SAFETY: the context is live; a non-null result points at `dims` floats owned by the context.
-                let pooled = unsafe {
-                    llama_get_embeddings_seq(self.context.as_ptr(), sequence as llama_seq_id)
-                };
-                if pooled.is_null() {
-                    return Err(LlamaError::MissingEmbedding(first_index + sequence));
-                }
+        // SAFETY: the context is live; a non-null result points at `dims` floats owned by the context.
+        let pooled = unsafe { llama_get_embeddings_seq(self.context.as_ptr(), 0) };
+        if pooled.is_null() {
+            return Err(LlamaError::MissingEmbedding(index));
+        }
 
-                // SAFETY: see above; copied out before the next call into the context.
-                let pooled = unsafe { std::slice::from_raw_parts(pooled, self.dims) };
-                Ok(normalised(pooled))
-            })
-            .collect()
+        // SAFETY: see above; copied out before the next call into the context.
+        let pooled = unsafe { std::slice::from_raw_parts(pooled, self.dims) };
+        Ok(normalised(pooled))
     }
 }
 
 impl Drop for EmbeddingModel {
     fn drop(&mut self) {
-        // SAFETY: all three were created in `load` and are freed only here.
+        // SAFETY: all three were created in `load` and are freed only here, before `low_priority_pool` is.
         unsafe {
             llama_batch_free(self.batch);
             llama_free(self.context.as_ptr());
             llama_model_free(self.model.as_ptr());
         }
     }
+}
+
+/// A ggml CPU thread pool, freed on drop.
+struct Threadpool {
+    pool: NonNull<ggml_threadpool>,
+    free: unsafe extern "C" fn(ggml_threadpool_t),
+}
+
+impl Threadpool {
+    /// `threads` workers, started from the calling thread, at ggml's low priority and without busy-waiting between
+    /// graphs.
+    fn low_priority(threads: i32) -> Result<Self, LlamaError> {
+        type New = unsafe extern "C" fn(*mut ggml_threadpool_params) -> ggml_threadpool_t;
+        type Free = unsafe extern "C" fn(ggml_threadpool_t);
+
+        // The CPU backend is loaded at run time on Windows and Linux, so its thread pool functions are looked up.
+        // SAFETY: the backends are initialised (a context exists), the names are NUL-terminated, and a non-null result
+        // is the named function, whose signature is ggml-cpu.h's.
+        let (new, free) = unsafe {
+            let cpu = ggml_backend_reg_by_name(c"CPU".as_ptr());
+            if cpu.is_null() {
+                return Err(LlamaError::NoThreadpool);
+            }
+            let new = ggml_backend_reg_get_proc_address(cpu, c"ggml_threadpool_new".as_ptr());
+            let free = ggml_backend_reg_get_proc_address(cpu, c"ggml_threadpool_free".as_ptr());
+            if new.is_null() || free.is_null() {
+                return Err(LlamaError::NoThreadpool);
+            }
+            (
+                std::mem::transmute::<*mut c_void, New>(new),
+                std::mem::transmute::<*mut c_void, Free>(free),
+            )
+        };
+
+        // SAFETY: plain value struct from ggml's defaults.
+        let mut params = unsafe { ggml_threadpool_params_default(threads) };
+        // Windows threads don't take their creator's priority, so ggml lowers each worker it starts.
+        params.prio = GGML_SCHED_PRIO_LOW;
+        params.poll = 0;
+
+        // SAFETY: `params` is valid for the call, which copies it.
+        let pool = NonNull::new(unsafe { new(&mut params) }).ok_or(LlamaError::CreateThreadpool)?;
+        Ok(Self { pool, free })
+    }
+}
+
+impl Drop for Threadpool {
+    fn drop(&mut self) {
+        // SAFETY: created in `low_priority`, no context uses it any more, and freed only here.
+        unsafe { (self.free)(self.pool.as_ptr()) };
+    }
+}
+
+/// Lowers the calling thread below normal priority until it ends. Threads it starts take that over on Linux and macOS.
+fn lower_this_thread() -> Result<(), LlamaError> {
+    #[cfg(target_os = "linux")]
+    {
+        unsafe extern "C" {
+            fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+        }
+        const PRIO_PROCESS: i32 = 0;
+
+        // On Linux the nice value is per thread, and process 0 is the calling thread.
+        // SAFETY: plain system call.
+        if unsafe { setpriority(PRIO_PROCESS, 0, BACKGROUND_NICE) } != 0 {
+            let error = io::Error::last_os_error();
+            // Refused only as a raise: a trove started under a higher nice value is already lower than this.
+            if error.kind() != io::ErrorKind::PermissionDenied {
+                return Err(LlamaError::LowerPriority(error));
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+        }
+        const QOS_CLASS_UTILITY: u32 = 0x11;
+
+        // SAFETY: plain call on the calling thread.
+        let error = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0) };
+        if error != 0 {
+            return Err(LlamaError::LowerPriority(io::Error::from_raw_os_error(
+                error,
+            )));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn GetCurrentThread() -> *mut c_void;
+            fn SetThreadPriority(thread: *mut c_void, priority: i32) -> i32;
+        }
+        const THREAD_PRIORITY_BELOW_NORMAL: i32 = -1;
+
+        // SAFETY: the pseudo handle of the calling thread is always valid.
+        if unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) } == 0 {
+            return Err(LlamaError::LowerPriority(io::Error::last_os_error()));
+        }
+    }
+
+    Ok(())
 }
 
 fn normalised(vector: &[f32]) -> Vec<f32> {
@@ -286,18 +449,36 @@ fn normalised(vector: &[f32]) -> Vec<f32> {
 /// Whether llama.cpp found a GPU, which `Devices::Default` then runs models on.
 pub fn has_gpu() -> Result<bool, LlamaError> {
     init_backend()?;
+    Ok(first_gpu().is_some())
+}
 
-    // SAFETY: the backends are initialised and every index below the count names a registered device.
-    let has_gpu = unsafe {
-        (0..ggml_backend_dev_count()).any(|index| {
-            matches!(
-                ggml_backend_dev_type(ggml_backend_dev_get(index)),
-                GGML_BACKEND_DEVICE_TYPE_GPU | GGML_BACKEND_DEVICE_TYPE_IGPU
-            )
-        })
+/// The GPU `Devices::Default` picks. Needs the backends initialised.
+fn first_gpu() -> Option<ggml_backend_dev_t> {
+    // SAFETY: every index below the count names a registered device.
+    let devices: Vec<(ggml_backend_dev_t, ggml_backend_dev_type)> = unsafe {
+        (0..ggml_backend_dev_count())
+            .map(|index| {
+                let device = ggml_backend_dev_get(index);
+                (device, ggml_backend_dev_type(device))
+            })
+            .collect()
     };
 
-    Ok(has_gpu)
+    [GGML_BACKEND_DEVICE_TYPE_GPU, GGML_BACKEND_DEVICE_TYPE_IGPU]
+        .into_iter()
+        .find_map(|wanted| {
+            devices
+                .iter()
+                .find(|(_, kind)| *kind == wanted)
+                .map(|(device, _)| *device)
+        })
+}
+
+fn device_description(device: ggml_backend_dev_t) -> String {
+    // SAFETY: `device` is registered, and its description is a NUL-terminated string it owns.
+    unsafe { CStr::from_ptr(ggml_backend_dev_description(device)) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// llama.cpp's process-wide setup, run once.
@@ -337,5 +518,43 @@ unsafe extern "C" fn log(level: ggml_log_level, text: *const c_char, _: *mut c_v
     if level >= i64::from(GGML_LOG_LEVEL_ERROR) && !text.is_null() {
         // SAFETY: llama.cpp passes a NUL-terminated message.
         eprint!("{}", unsafe { CStr::from_ptr(text) }.to_string_lossy());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use std::{fs, thread};
+
+    use super::{BACKGROUND_NICE, lower_this_thread};
+
+    fn nice_of_this_thread() -> i32 {
+        let stat = fs::read_to_string("/proc/thread-self/stat").unwrap();
+        // The fields after the parenthesised command name; the nice value is the 19th field of the line.
+        let fields: Vec<&str> = stat
+            .rsplit_once(')')
+            .unwrap()
+            .1
+            .split_whitespace()
+            .collect();
+        fields[16].parse().unwrap()
+    }
+
+    #[test]
+    fn a_lowered_thread_and_the_threads_it_starts_run_niced_and_the_caller_keeps_its_priority() {
+        let caller = nice_of_this_thread();
+        let (lowered, started) = thread::spawn(|| {
+            lower_this_thread().unwrap();
+            (
+                nice_of_this_thread(),
+                thread::spawn(nice_of_this_thread).join().unwrap(),
+            )
+        })
+        .join()
+        .unwrap();
+
+        let expected = caller.max(BACKGROUND_NICE);
+        assert_eq!(lowered, expected);
+        assert_eq!(started, expected);
+        assert_eq!(nice_of_this_thread(), caller);
     }
 }

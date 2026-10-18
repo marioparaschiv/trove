@@ -12,7 +12,9 @@ use super::{
     AppState,
     indexing::{Job, import_vector_files},
 };
-use crate::{error::full_message, indexer::IndexMode, sync_store::vector_file_name};
+use crate::{
+    embedder::Profile, error::full_message, indexer::IndexMode, sync_store::vector_file_name,
+};
 
 pub(super) type Changes = mpsc::UnboundedReceiver<notify::Result<notify::Event>>;
 
@@ -211,7 +213,7 @@ pub(super) async fn index_changes(state: Arc<AppState>, mut changes: Changes) {
 
         // Failures are reported on the events stream and stderr, and the next change tries again.
         if let Some(job) = job {
-            let _ = job.run(IndexMode::Changed).await;
+            let _ = job.run(IndexMode::Changed, Profile::Background).await;
         }
         if !batch.vector_files.is_empty() {
             import_vector_files(&state, batch.vector_files.into_iter().collect()).await;

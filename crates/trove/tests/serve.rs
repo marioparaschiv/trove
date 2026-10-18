@@ -41,7 +41,10 @@ fn status_needs_the_token_and_the_local_host() {
         body["index"],
         serde_json::json!({ "files": 0, "chunks": 0 })
     );
-    assert_eq!(body["model"], serde_json::json!({ "loaded": false }));
+    assert_eq!(
+        body["model"],
+        serde_json::json!({ "loaded": false, "device": null })
+    );
 
     let localhost = format!("localhost:{}", serve.port);
     assert_eq!(serve.get("/status", &localhost, Some(&serve.token)).0, 200);

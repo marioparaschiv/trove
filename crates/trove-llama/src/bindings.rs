@@ -207,12 +207,63 @@ pub type ggml_log_callback = ::std::option::Option<
         user_data: *mut ::std::os::raw::c_void,
     ),
 >;
+pub const GGML_SCHED_PRIO_LOW: ggml_sched_priority = -1;
+pub const GGML_SCHED_PRIO_NORMAL: ggml_sched_priority = 0;
+pub const GGML_SCHED_PRIO_MEDIUM: ggml_sched_priority = 1;
+pub const GGML_SCHED_PRIO_HIGH: ggml_sched_priority = 2;
+pub const GGML_SCHED_PRIO_REALTIME: ggml_sched_priority = 3;
+pub type ggml_sched_priority = ::std::os::raw::c_int;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ggml_threadpool_params {
+    pub cpumask: [bool; 512usize],
+    pub n_threads: ::std::os::raw::c_int,
+    pub prio: ggml_sched_priority,
+    pub poll: u32,
+    pub strict_cpu: bool,
+    pub paused: bool,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of ggml_threadpool_params"][::std::mem::size_of::<ggml_threadpool_params>() - 528usize];
+    ["Alignment of ggml_threadpool_params"]
+        [::std::mem::align_of::<ggml_threadpool_params>() - 4usize];
+    ["Offset of field: ggml_threadpool_params::cpumask"]
+        [::std::mem::offset_of!(ggml_threadpool_params, cpumask) - 0usize];
+    ["Offset of field: ggml_threadpool_params::n_threads"]
+        [::std::mem::offset_of!(ggml_threadpool_params, n_threads) - 512usize];
+    ["Offset of field: ggml_threadpool_params::prio"]
+        [::std::mem::offset_of!(ggml_threadpool_params, prio) - 516usize];
+    ["Offset of field: ggml_threadpool_params::poll"]
+        [::std::mem::offset_of!(ggml_threadpool_params, poll) - 520usize];
+    ["Offset of field: ggml_threadpool_params::strict_cpu"]
+        [::std::mem::offset_of!(ggml_threadpool_params, strict_cpu) - 524usize];
+    ["Offset of field: ggml_threadpool_params::paused"]
+        [::std::mem::offset_of!(ggml_threadpool_params, paused) - 525usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ggml_threadpool {
+    _unused: [u8; 0],
+}
+pub type ggml_threadpool_t = *mut ggml_threadpool;
+unsafe extern "C" {
+    pub fn ggml_threadpool_params_default(
+        n_threads: ::std::os::raw::c_int,
+    ) -> ggml_threadpool_params;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ggml_backend_buffer_type {
     _unused: [u8; 0],
 }
 pub type ggml_backend_buffer_type_t = *mut ggml_backend_buffer_type;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ggml_backend_reg {
+    _unused: [u8; 0],
+}
+pub type ggml_backend_reg_t = *mut ggml_backend_reg;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ggml_backend_device {
@@ -226,7 +277,21 @@ pub const GGML_BACKEND_DEVICE_TYPE_ACCEL: ggml_backend_dev_type = 3;
 pub const GGML_BACKEND_DEVICE_TYPE_META: ggml_backend_dev_type = 4;
 pub type ggml_backend_dev_type = ::std::os::raw::c_int;
 unsafe extern "C" {
+    pub fn ggml_backend_dev_description(
+        device: ggml_backend_dev_t,
+    ) -> *const ::std::os::raw::c_char;
+}
+unsafe extern "C" {
     pub fn ggml_backend_dev_type(device: ggml_backend_dev_t) -> ggml_backend_dev_type;
+}
+unsafe extern "C" {
+    pub fn ggml_backend_reg_get_proc_address(
+        reg: ggml_backend_reg_t,
+        name: *const ::std::os::raw::c_char,
+    ) -> *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    pub fn ggml_backend_reg_by_name(name: *const ::std::os::raw::c_char) -> ggml_backend_reg_t;
 }
 unsafe extern "C" {
     pub fn ggml_backend_dev_count() -> usize;
@@ -640,6 +705,16 @@ unsafe extern "C" {
     pub fn llama_backend_init();
 }
 unsafe extern "C" {
+    pub fn llama_attach_threadpool(
+        ctx: *mut llama_context,
+        threadpool: ggml_threadpool_t,
+        threadpool_batch: ggml_threadpool_t,
+    );
+}
+unsafe extern "C" {
+    pub fn llama_detach_threadpool(ctx: *mut llama_context);
+}
+unsafe extern "C" {
     pub fn llama_model_load_from_file(
         path_model: *const ::std::os::raw::c_char,
         params: llama_model_params,
@@ -671,6 +746,9 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn llama_encode(ctx: *mut llama_context, batch: llama_batch) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_set_n_threads(ctx: *mut llama_context, n_threads: i32, n_threads_batch: i32);
 }
 unsafe extern "C" {
     pub fn llama_get_embeddings_seq(ctx: *mut llama_context, seq_id: llama_seq_id) -> *mut f32;

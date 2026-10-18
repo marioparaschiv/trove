@@ -41,7 +41,7 @@ pub use status::Status;
 use crate::{
     config::Config,
     data_dir::DataDir,
-    embedder::Embedder,
+    embedder::{Embedder, Profile},
     index::{Index, IndexError},
     indexer::IndexMode,
 };
@@ -181,7 +181,10 @@ impl Service {
             Arc::clone(&self.state),
             self.changes,
         ));
-        tokio::spawn(self.startup_index.run(IndexMode::Changed));
+        tokio::spawn(
+            self.startup_index
+                .run(IndexMode::Changed, Profile::Background),
+        );
 
         let shutdown = self.state.shutdown.clone();
         let server = tokio::spawn(
