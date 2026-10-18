@@ -159,7 +159,7 @@ fn fixed_texts_match_the_committed_reference_vectors() {
 }
 
 /// GPU (Metal, Vulkan) and CPU vectors share one index only while they agree; otherwise the backend has to go into
-/// `vector_version`. Every Mac has Metal; elsewhere this needs a Vulkan driver and checks nothing without one.
+/// `vector_version`. Every Mac has Metal; elsewhere this needs a discrete GPU with a Vulkan driver and checks nothing without one.
 #[test]
 fn gpu_and_cpu_vectors_for_the_reference_texts_agree() {
     use trove_core::embedder::{Devices, has_gpu};

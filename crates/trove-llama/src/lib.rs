@@ -85,8 +85,7 @@ impl Priority {
 /// The devices llama.cpp may run a model on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Devices {
-    /// The first GPU llama.cpp found (Metal on macOS, Vulkan elsewhere), a discrete one before an integrated one, else
-    /// the CPU.
+    /// The first discrete GPU llama.cpp found (Metal on macOS, Vulkan elsewhere), else the CPU.
     Default,
     /// The CPU only, even when a GPU is present.
     Cpu,
@@ -452,26 +451,16 @@ pub fn has_gpu() -> Result<bool, LlamaError> {
     Ok(first_gpu().is_some())
 }
 
-/// The GPU `Devices::Default` picks. Needs the backends initialised.
+/// The GPU `Devices::Default` picks. Needs the backends initialised. Integrated Vulkan GPUs are skipped: on a Ryzen
+/// iGPU (RADV) the same text embedded twice drifted to cosine 0.92, and indexed slower than the CPU. Metal reports
+/// Apple GPUs as discrete.
 fn first_gpu() -> Option<ggml_backend_dev_t> {
     // SAFETY: every index below the count names a registered device.
-    let devices: Vec<(ggml_backend_dev_t, ggml_backend_dev_type)> = unsafe {
+    unsafe {
         (0..ggml_backend_dev_count())
-            .map(|index| {
-                let device = ggml_backend_dev_get(index);
-                (device, ggml_backend_dev_type(device))
-            })
-            .collect()
-    };
-
-    [GGML_BACKEND_DEVICE_TYPE_GPU, GGML_BACKEND_DEVICE_TYPE_IGPU]
-        .into_iter()
-        .find_map(|wanted| {
-            devices
-                .iter()
-                .find(|(_, kind)| *kind == wanted)
-                .map(|(device, _)| *device)
-        })
+            .map(|index| ggml_backend_dev_get(index))
+            .find(|&device| ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_GPU)
+    }
 }
 
 fn device_description(device: ggml_backend_dev_t) -> String {
