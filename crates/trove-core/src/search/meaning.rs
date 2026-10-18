@@ -49,11 +49,12 @@ impl Stage for Meaning<'_> {
 
         let query_vector = self.embedder.embed_query(&query.text)?;
         let mut index = index::lock(self.index);
-        let mut scores = z_scores(index.chunk_scores(&query_vector)?);
+        let scan = index.vector_scan()?;
+        let mut scores = z_scores(scan.scores(&query_vector)?);
         let rows = feedback_rows(&words::terms(&query.text), &scores);
         if !rows.is_empty() {
-            let expanded = expanded(&query_vector, &index.chunk_vectors(&rows)?, self.feedback);
-            scores = z_scores(index.chunk_scores(&expanded)?);
+            let expanded = expanded(&query_vector, &scan.vectors(&rows), self.feedback);
+            scores = z_scores(scan.scores(&expanded)?);
         }
         drop(index);
 

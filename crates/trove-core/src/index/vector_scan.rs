@@ -426,7 +426,7 @@ mod tests {
 
         let mut query = vec![0.0; DIMS];
         query[0] = 1.0;
-        let scores = index.chunk_scores(&query).unwrap();
+        let scores = index.vector_scan().unwrap().scores(&query).unwrap();
         assert_eq!(scores, [(1, 1.0), (2, 0.0)]);
         drop(index);
 
@@ -449,7 +449,7 @@ mod tests {
             fs::write(&path, &file).unwrap();
 
             let mut index = Index::open(&data_dir).unwrap();
-            assert_eq!(index.chunk_scores(&query).unwrap(), scores);
+            assert_eq!(index.vector_scan().unwrap().scores(&query).unwrap(), scores);
             assert_eq!(fs::read(&path).unwrap(), written);
         }
     }

@@ -111,22 +111,6 @@ impl Index {
         )
     }
 
-    /// Each embedded chunk's cosine similarity to `query`, a unit vector, in chunk id order.
-    pub(crate) fn chunk_scores(
-        &mut self,
-        query: &[f32],
-    ) -> Result<Vec<(i64, f32)>, VectorScanError> {
-        self.vector_scan()?.scores(query)
-    }
-
-    /// The vectors of the chunks at `rows`, positions in [`Self::chunk_scores`], as the scan file holds them.
-    pub(crate) fn chunk_vectors(
-        &mut self,
-        rows: &[usize],
-    ) -> Result<Vec<Vec<f32>>, VectorScanError> {
-        Ok(self.vector_scan()?.vectors(rows))
-    }
-
     /// Writes the vector scan file again from the index's vectors.
     pub(crate) fn rebuild_vector_scan(&mut self) -> Result<(), VectorScanError> {
         let version = self.version()?;
@@ -137,8 +121,9 @@ impl Index {
     }
 
     /// The vector scan file, checked against the index whenever the index has changed or the file is gone, and
-    /// written again when it doesn't hold the index's current vectors.
-    fn vector_scan(&mut self) -> Result<&VectorScan, VectorScanError> {
+    /// written again when it doesn't hold the index's current vectors. Row positions from one call hold only for the
+    /// file it returns: another process's index run can replace it before the next.
+    pub(crate) fn vector_scan(&mut self) -> Result<&VectorScan, VectorScanError> {
         let version = self.version()?;
         let exists =
             self.vector_scan_path
