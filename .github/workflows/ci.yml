@@ -71,7 +71,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: target/debug/build/trove-llama-*/out
-          key: llama-cpp-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-vulkan-${{ env.VULKAN_SDK_VERSION }}-${{ hashFiles('Cargo.lock', 'crates/trove-llama/build.rs', 'crates/trove-llama/*.patch') }}
+          key: llama-cpp-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-vulkan-${{ runner.os == 'Linux' && format('{0}-{1}-{2}', env.UBUNTU_LIBVULKAN_DEV, env.UBUNTU_GLSLC, env.UBUNTU_SPIRV_HEADERS) || env.VULKAN_SDK_VERSION }}-${{ hashFiles('Cargo.lock', 'crates/trove-llama/build.rs', 'crates/trove-llama/*.patch') }}
 
       - name: Read the model pin
         id: model
