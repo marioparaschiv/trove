@@ -259,15 +259,13 @@ impl VectorScan {
     /// The vectors of `rows` (positions in [`Self::scores`]), back from int8: each about the vector the index holds.
     pub(crate) fn vectors(&self, rows: &[usize]) -> Vec<Vec<f32>> {
         let dims = self.header.dims as usize;
-        let checked = "checked when the file was read";
-        let (vectors, rest) =
-            self.map[HEADER_LEN..].split_at(self.header.vectors_len().expect(checked));
-        let vectors = <[i8]>::ref_from_bytes(vectors).expect("any bytes are i8s");
+        let (vectors, scales, _) = self.sections();
 
         rows.iter()
             .map(|&row| {
                 let at = row * size_of::<f32>();
-                let scale = f32::from_le_bytes(rest[at..at + size_of::<f32>()].try_into().unwrap());
+                let scale =
+                    f32::from_le_bytes(scales[at..at + size_of::<f32>()].try_into().unwrap());
                 vectors[row * dims..(row + 1) * dims]
                     .iter()
                     .map(|&value| f32::from(value) * scale)
@@ -290,12 +288,7 @@ impl VectorScan {
             });
         }
         let (query_scale, query) = quantised(query);
-
-        let checked = "checked when the file was read";
-        let (vectors, rest) =
-            self.map[HEADER_LEN..].split_at(self.header.vectors_len().expect(checked));
-        let (scales, ids) = rest.split_at(self.header.scales_len().expect(checked));
-        let vectors = <[i8]>::ref_from_bytes(vectors).expect("any bytes are i8s");
+        let (vectors, scales, ids) = self.sections();
 
         Ok(ids
             .chunks_exact(size_of::<i64>())
@@ -309,6 +302,20 @@ impl VectorScan {
                 )
             })
             .collect())
+    }
+
+    /// The file after its header: the vectors, the scales' bytes and the chunk ids' bytes.
+    fn sections(&self) -> (&[i8], &[u8], &[u8]) {
+        let checked = "checked when the file was read";
+        let (vectors, rest) =
+            self.map[HEADER_LEN..].split_at(self.header.vectors_len().expect(checked));
+        let (scales, ids) = rest.split_at(self.header.scales_len().expect(checked));
+
+        (
+            <[i8]>::ref_from_bytes(vectors).expect("any bytes are i8s"),
+            scales,
+            ids,
+        )
     }
 }
 
