@@ -296,9 +296,13 @@ pub(super) fn terms(text: &str) -> Vec<String> {
 pub(super) fn is_lookup(terms: &[String]) -> bool {
     !terms.is_empty()
         && terms.iter().all(|term| {
-            term.chars().any(char::is_numeric)
-                && (term.chars().any(char::is_alphabetic) || term.chars().count() >= 4)
+            has_digit(term) && (term.chars().any(char::is_alphabetic) || term.chars().count() >= 4)
         })
+}
+
+/// Whether a term has a digit, as a code, an ID or a number does.
+pub(super) fn has_digit(term: &str) -> bool {
+    term.chars().any(char::is_numeric)
 }
 
 /// How each term is looked for. A term in the index as typed stays whole, so "cat" doesn't bring in "category". Else
@@ -325,7 +329,7 @@ fn patterns(conn: &Connection, terms: &[String]) -> rusqlite::Result<Vec<Pattern
             } else {
                 whole
             };
-            if is_indexed.exists([&pattern])? || term.chars().any(char::is_numeric) {
+            if is_indexed.exists([&pattern])? || has_digit(term) {
                 return Ok(Pattern::Words(pattern));
             }
 

@@ -101,7 +101,7 @@ fn z_scores(scores: Vec<(i64, f32)>) -> Vec<(i64, f32)> {
 /// finds nothing.
 fn feedback_rows(terms: &[String], scores: &[(i64, f32)]) -> Vec<usize> {
     if !(1..=FEEDBACK_MAX_WORDS).contains(&terms.len())
-        || terms.iter().any(|term| term.chars().any(char::is_numeric))
+        || terms.iter().any(|term| words::has_digit(term))
     {
         return Vec::new();
     }

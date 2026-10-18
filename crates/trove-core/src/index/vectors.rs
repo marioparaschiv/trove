@@ -155,12 +155,7 @@ impl Index {
     /// The `vector_version` the stored vectors were made under; empty before the first index run.
     fn vector_version(&self) -> rusqlite::Result<String> {
         Ok(self
-            .conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'vector_version'",
-                [],
-                |row| row.get(0),
-            )
+            .meta::<String>("vector_version")
             .optional()?
             .unwrap_or_default())
     }
