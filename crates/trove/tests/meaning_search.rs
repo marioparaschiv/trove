@@ -3,10 +3,11 @@ mod common;
 use std::{collections::HashSet, fs, path::Path};
 
 use common::{
-    FIXTURE_VAULT, Serve, data_dir_with_model, indexed, path_str, percent_encode, result_paths,
-    run, search, trove, vault_copy,
+    FIXTURE_VAULT, HIDDEN_TOPIC, Serve, data_dir_with_model, indexed, path_str, percent_encode,
+    result_paths, run, search, search_with_switches, trove, vault_copy,
 };
 use serde_json::{Value, json};
+use trove_core::index::VECTOR_SCAN_FILE;
 
 struct Paraphrase {
     query: &'static str,
@@ -39,9 +40,6 @@ const PARAPHRASES: [Paraphrase; 4] = [
 ];
 
 const MATCHES_NOTHING: &str = "differential equations for orbital mechanics";
-
-/// Only notes in `.obsidian` and `.trash` are about this.
-const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
 
 fn words(text: &str) -> HashSet<String> {
     text.split(|char: char| !char.is_alphanumeric())
@@ -91,6 +89,41 @@ fn a_paraphrase_sharing_no_words_finds_its_note_first_at_the_heading() {
 }
 
 #[test]
+fn a_note_matching_in_several_sections_ranks_above_one_with_a_single_closer_paragraph() {
+    let vault = vault_copy();
+    fs::write(
+        vault.path().join("Kayak trips.md"),
+        "# Kayak trips\n\n## Paddling\n\nOn a sea kayak day trip I keep a low, relaxed paddle stroke and rotate from \
+         the torso, so a long crossing does not tire my arms.\n\n## Packing the kayak\n\nFor a sea kayak day trip, \
+         heavy gear goes low in the kayak hatches, water and food behind the seat.\n\n## Rescues\n\nBefore any sea \
+         kayak trip we practise the assisted rescue: drain the swamped kayak across my deck, then hold it while the \
+         paddler climbs back in.\n",
+    )
+    .unwrap();
+    // Its Saturday matches the query better than any one section above.
+    fs::write(
+        vault.path().join("Weekend notes.md"),
+        "# Weekend notes\n\n## Saturday\n\nWent on a sea kayak trip: paddled along the coast to the sea caves and \
+         back, about twelve kilometres.\n\n## Shopping\n\nNeed batteries, dish soap, a new kettle descaler and \
+         stamps.\n\n## Car\n\nThe rear tyre is losing pressure again; book the garage for a puncture repair.\n",
+    )
+    .unwrap();
+    let data_dir = indexed(vault.path());
+
+    // Long enough not to be expanded with its best chunk, which would pull it towards that one paragraph.
+    let response = search_with_switches(
+        data_dir.path(),
+        "a kayak trip out on the sea with friends again",
+        &["--no-words", "--no-graph"],
+    );
+    assert_eq!(
+        result_paths(&response),
+        ["Kayak trips.md", "Weekend notes.md"],
+        "{response}"
+    );
+}
+
+#[test]
 fn a_query_matching_nothing_finds_nothing() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
@@ -102,6 +135,11 @@ fn a_query_matching_nothing_finds_nothing() {
     assert_eq!(
         run(data_dir.path(), &["search", MATCHES_NOTHING]),
         "no matches\n"
+    );
+    // Short enough to be expanded with what it finds, which is nothing.
+    assert_eq!(
+        search(data_dir.path(), "quantum chromodynamics"),
+        json!({ "results": [] })
     );
 }
 
@@ -126,6 +164,34 @@ fn notes_in_obsidian_and_trash_folders_are_never_indexed() {
         result_paths(&search(data_dir.path(), HIDDEN_TOPIC)),
         ["Beekeeping.md"]
     );
+}
+
+#[test]
+fn a_missing_or_stale_vector_scan_file_is_written_again_by_the_next_search() {
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
+    let scan_file = data_dir.path().join(VECTOR_SCAN_FILE);
+    let paraphrase = &PARAPHRASES[0];
+    let found = search(data_dir.path(), paraphrase.query);
+    assert_found_first(&found, paraphrase);
+
+    fs::remove_file(&scan_file).unwrap();
+    assert_eq!(search(data_dir.path(), paraphrase.query), found);
+    assert!(scan_file.is_file());
+
+    // The file from before an index run that adds a note, put back in place of the one that run wrote.
+    let stale = fs::read(&scan_file).unwrap();
+    fs::copy(
+        vault.path().join(".trash/Beekeeping.md"),
+        vault.path().join("Beekeeping.md"),
+    )
+    .unwrap();
+    run(data_dir.path(), &["index"]);
+    fs::write(&scan_file, &stale).unwrap();
+    let response =
+        search_with_switches(data_dir.path(), HIDDEN_TOPIC, &["--no-words", "--no-graph"]);
+    assert_eq!(result_paths(&response), ["Beekeeping.md"]);
+    assert_ne!(fs::read(&scan_file).unwrap(), stale);
 }
 
 #[test]

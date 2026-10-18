@@ -1,0 +1,3 @@
+#allotment #garlic
+
+Planted garlic 27 October 2024 in raised bed 1, with the extra barrow of grit as per [[Raised bed soil mix]]. Three bulbs of 'Lautrec Wight' and two of 'Solent Wight' from The Garlic Farm, £11.40 plus £4.95 postage, order GF-73318. Broke into 42 cloves, the biggest only; the small middle ones went in the kitchen. 15 cm between cloves, 30 cm between rows, tips just under 2.5 cm of soil. Blackbirds pulled up nine of them by the 30th, so fleece over until they rooted. Last year's 'Solent Wight' lifted 2 July, 31 heads, plaited and hung in the porch. Clare has asked for a dozen heads for her [[Kimchi batch log]] experiments, which apparently need "a frankly alarming amount".

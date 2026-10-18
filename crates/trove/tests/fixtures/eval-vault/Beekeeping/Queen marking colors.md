@@ -1,0 +1,4 @@
+---
+tags: [bees, queens]
+---
+Queen marking colours go by the last digit of the year she was born: 1 or 6 white, 2 or 7 yellow, 3 or 8 red, 4 or 9 green, 5 or 0 blue. "Will You Raise Good Bees" is the way I taught it to the Year 5s on the school bee day and the way I still remember it. Uni-Posca PC-1M pens, one of each colour, £3.10 each, kept in a tin with the queen clip and the crown-of-thorns cage. Current queens: Primrose red (2023, the old girl), Bramble green (2024), Hazel green (2024, superseded quietly in July), Ivy blue (2025, from the Hennock swarm's daughter, marked 8 June 2025). Never mark on a cold day, and let the paint dry 30 seconds before she goes back or the workers lick it off. Checked off at every visit on the [[Hive inspection checklist]]; any new swarm queen gets marked as in [[Swarm catching]].

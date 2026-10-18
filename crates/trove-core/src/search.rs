@@ -1,24 +1,36 @@
 mod collapse;
-mod fusion;
+pub mod features;
 mod graph;
 mod meaning;
 mod request;
+mod scoring;
+mod weights;
 mod words;
 
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use crate::embedder::EmbedderError;
+use crate::{
+    embedder::EmbedderError,
+    index::{Index, VectorScanError},
+};
 
 pub(crate) use collapse::CollapseToNotes;
-pub(crate) use fusion::Fusion;
 pub(crate) use graph::GraphRerank;
 pub(crate) use meaning::Meaning;
 pub(crate) use request::results;
-pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
+pub use request::{
+    DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search, search_with,
+};
+pub(crate) use scoring::Scoring;
+pub use scoring::Signals;
+pub use weights::{WEIGHTS, Weights};
 pub(crate) use words::Words;
 
 pub struct Query {
@@ -52,6 +64,20 @@ pub struct Candidate {
     pub score: f32,
     /// The stages that found this chunk.
     pub why: BTreeSet<Signal>,
+    /// How much of the query the chunk's note has, for a chunk found by words. `Some` marks a word match, whose score
+    /// is unused: scoring reads the coverage.
+    pub coverage: Option<Coverage>,
+}
+
+/// How much of the query's words a note has.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Coverage {
+    /// The share of the query's words in the note, which decides whether it matches by words.
+    pub share: f32,
+    /// The share with each word weighted by how few notes have it, which ranks the notes that match.
+    pub weighted: f32,
+    /// The weighted share of the query's words in the note's title; 0 when titles aren't read ([`Weights::title`]).
+    pub in_title: f32,
 }
 
 #[derive(Debug, Error)]
@@ -64,6 +90,8 @@ pub enum SearchError {
     Index(#[from] rusqlite::Error),
     #[error(transparent)]
     Embedder(#[from] EmbedderError),
+    #[error(transparent)]
+    VectorScan(#[from] VectorScanError),
 }
 
 /// One step of search. Each stage gets the previous stage's candidates and returns its own.
@@ -87,4 +115,21 @@ impl<'a> Pipeline<'a> {
             .iter()
             .try_fold(Vec::new(), |candidates, stage| stage.run(query, candidates))
     }
+}
+
+/// The note of each candidate's chunk, by chunk id.
+fn note_ids(index: &Index, candidates: &[Candidate]) -> rusqlite::Result<HashMap<i64, i64>> {
+    let chunk_ids: Vec<i64> = candidates
+        .iter()
+        .map(|candidate| candidate.chunk_id)
+        .collect();
+    let mut statement = index
+        .connection()
+        .prepare("SELECT id, file_id FROM chunks WHERE id IN (SELECT value FROM json_each(?1))")?;
+
+    statement
+        .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect()
 }

@@ -1,0 +1,3 @@
+#logging #compliance
+
+Loki for app logs: 30 days, then gone. Audit logs (who changed payout limits, who approved a KYC override) go to a bucket with object lock in compliance mode for 10 years, because GwG and BaFin say so. Ingress access logs: 90 days, with IP addresses truncated to /24 after 7 days, agreed with our DPO Henrike Lammers in OPS-1188. Loki storage costs EUR 212 a month for about 1.9 TB at 30 days. We tried 60 days in October 2024: cost doubled, and in three months nobody queried anything older than day 19, so back to 30. The setting is `limits_config.retention_period: 720h`, and the compactor also needs `retention_enabled: true`. I forgot that one the first time and nothing was removed for 41 days, until the disk alert went off at 03:10 on a Saturday.

@@ -21,7 +21,7 @@ use crate::{
     config::Config,
     embedder::{Embedder, vector_version},
     error::full_message,
-    index::{self, Index, Source},
+    index::{self, Index, IndexError, Source},
     sync_store::{SyncStore, VectorFile},
 };
 
@@ -142,6 +142,9 @@ pub fn index_sources(
         &mut report,
     )?;
     update_graph_edges(index)?;
+    index::lock(index)
+        .rebuild_vector_scan()
+        .map_err(IndexError::from)?;
 
     Ok(report)
 }
@@ -153,7 +156,7 @@ fn notes_to_store(index: &Index, written: &[i64]) -> rusqlite::Result<Vec<i64>> 
         "SELECT value FROM json_each(?1)
          UNION
          SELECT c.file_id FROM chunks c
-         WHERE NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
+         WHERE c.has_words AND NOT EXISTS (SELECT 1 FROM vectors v WHERE v.text_hash = c.text_hash)",
     )?;
 
     statement.query_map([written], |row| row.get(0))?.collect()

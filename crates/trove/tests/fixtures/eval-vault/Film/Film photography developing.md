@@ -1,0 +1,4 @@
+---
+tags: [photography, darkroom]
+---
+Kitchen developing, black and white only. Ilford HP5+ shot at box speed (400) on the Olympus OM-1 I got from my dad. Developer Ilfotec DD-X 1+4, 9 minutes at 20°C, invert four times every minute, tap the tank on the counter after each set to knock off air bubbles. Stop bath is plain water, three changes. Fixer Ilford Rapid Fixer 1+4, 5 minutes. Wash with the Ilford method (5, 10, 20 inversions), a drop of Ilfotol, hang in the shower overnight. The Paterson System 4 reel jams if the end of the film is even slightly bent, so cut the corners off before loading it in the changing bag. Pushed a roll of HP5+ to 1600 at a Govan gig in March 2025: 15 minutes in DD-X, grainy as porridge but usable. Chemicals from Silverprint, £42 for the lot, good for about 15 rolls. Scans on an Epson V600 at 3200 dpi, roll codes like OM1-2503-07 written on the sleeve.

@@ -1,0 +1,3 @@
+#cooking #rice
+
+Zojirushi NS-ZCC10 at home, the 5.5 cup one, £189 in the 2023 Black Friday sale. Truck uses a Tiger JNO-A36U commercial, 20 cups. By weight, always, the cup lines lie. Jasmine 1:1.2 (300 g rice to 360 g water), basmati 1:1.3 after a 20 min soak, sushi rice (Nishiki) 1:1.1 then 10 min steam with the lid shut, brown rice 1:1.6. The bran for the [[ぬか漬け]] bed comes in a bag from Wing Yip, not from this, before anyone asks. Rinse jasmine 3 times until the water's only a bit cloudy, not crystal. Truck batch: 4 kg jasmine + 4.8 kg water feeds about 70 bowls at 120 g dry per... no, 57 g dry per bowl, it triples. Holds on warm for 6 hours max, after that it goes yellow at the edges. Used for [[Weeknight stir fry]] and under the [[麻婆豆腐]].

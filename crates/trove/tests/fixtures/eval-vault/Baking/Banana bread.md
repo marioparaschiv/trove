@@ -1,0 +1,4 @@
+---
+tags: [baking]
+---
+Mum's banana bread, the Stockport version, copied out of her stained recipe notebook on 9 March 2024. 3 properly black bananas (about 330 g peeled), mashed with a fork, lumps are fine. 75 g melted butter, 150 g light muscovado, 1 large egg, 1 tsp vanilla, 1 tsp bicarb, pinch of salt, 190 g plain flour, 60 g walnuts toasted 6 min at 180°C. Wet into dry, mix by hand until just no flour showing, 12 strokes. 2 lb loaf tin lined with a parchment sling, 175°C for 55 to 60 min, skewer clean, foil over the top at 40 min if it's going too dark. Cool in the tin 15 min. She adds a tablespoon of Lyle's golden syrup on top while it's hot, I add a sliced banana down the middle before baking, we argue about it every time. Keeps 4 days wrapped, better on day 2. Costs about £1.60 a loaf.

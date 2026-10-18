@@ -331,7 +331,8 @@ impl Builder<'_> {
 
         let file_ids = serde_json::to_string(&file_ids).expect("a list of ids serialises");
         let mut statement = self.conn.prepare(
-            "SELECT c.file_id, c.id, t.text FROM chunks c JOIN chunks_fts t ON t.rowid = c.id
+            "SELECT c.file_id, c.id, coalesce(t.original, t.text)
+             FROM chunks c JOIN chunks_fts t ON t.rowid = c.id
              WHERE c.file_id IN (SELECT value FROM json_each(?1)) ORDER BY c.file_id, c.ordinal",
         )?;
         let mut rows = statement.query([file_ids])?;

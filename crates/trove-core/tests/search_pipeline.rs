@@ -14,6 +14,7 @@ impl Stage for AppendChunk {
             chunk_id: self.0,
             score: 1.0,
             why: BTreeSet::new(),
+            coverage: None,
         });
 
         Ok(candidates)

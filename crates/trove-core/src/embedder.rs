@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, mpsc},
     thread,
@@ -20,6 +21,8 @@ const QUERY_PREFIX: &str = "task: search result | query: ";
 const DOCUMENT_TITLE_PREFIX: &str = "title: ";
 const DOCUMENT_TEXT_PREFIX: &str = " | text: ";
 const NO_TITLE: &str = "none";
+/// Query vectors kept for queries asked again, as when typing and deleting.
+const QUERY_CACHE_SIZE: usize = 64;
 
 /// One text to embed, framed with the model card's prompt for its role.
 #[derive(Debug, Clone, Copy)]
@@ -91,6 +94,8 @@ struct Shared {
 
 struct State {
     model: Option<EmbeddingModel>,
+    /// Vectors the loaded model made for recent queries.
+    query_vectors: QueryCache,
     last_used: Instant,
     // Tells an idle watcher whether the model it was started for is still the loaded one.
     generation: u64,
@@ -114,6 +119,7 @@ impl Embedder {
                 idle_timeout,
                 state: Mutex::new(State {
                     model: None,
+                    query_vectors: QueryCache::default(),
                     last_used: Instant::now(),
                     generation: 0,
                 }),
@@ -149,6 +155,28 @@ impl Embedder {
         Ok(vectors)
     }
 
+    /// The vector of a search query, made again only for a query the loaded model hasn't seen lately.
+    pub fn embed_query(&self, text: &str) -> Result<Arc<[f32]>, EmbedderError> {
+        let mut state = self.shared.loaded_state()?;
+        if let Some(vector) = state.query_vectors.get(text) {
+            return Ok(vector);
+        }
+
+        let model = state
+            .model
+            .as_mut()
+            .expect("loaded_state returns a loaded model");
+        let vector: Arc<[f32]> = model
+            .embed(&[&Input::Query(text).prompt()])?
+            .pop()
+            .expect("one vector per input")
+            .into();
+        state.last_used = Instant::now();
+        state.query_vectors.insert(text, Arc::clone(&vector));
+
+        Ok(vector)
+    }
+
     /// The tokens `input` takes as a prompt, uncut: more than `CONTEXT_TOKENS` means `embed` would cut it. Loads the
     /// model, which holds the vocabulary.
     pub fn count_tokens(&self, input: Input<'_>) -> Result<usize, EmbedderError> {
@@ -165,7 +193,7 @@ impl Embedder {
 
     pub fn unload(&self) {
         let mut state = self.shared.lock_state();
-        if state.model.take().is_some() {
+        if state.unload_model() {
             self.shared.state_changed.notify_all();
             self.shared.notify(ModelEvent::Unloaded);
         }
@@ -192,6 +220,36 @@ impl Embedder {
 impl Drop for Embedder {
     fn drop(&mut self) {
         self.unload();
+    }
+}
+
+impl State {
+    /// Drops the model and the query vectors it made. Returns whether a model was loaded.
+    fn unload_model(&mut self) -> bool {
+        self.query_vectors = QueryCache::default();
+        self.model.take().is_some()
+    }
+}
+
+/// The last `QUERY_CACHE_SIZE` query vectors, by exact query text, least recently used first.
+#[derive(Default)]
+struct QueryCache(VecDeque<(String, Arc<[f32]>)>);
+
+impl QueryCache {
+    fn get(&mut self, text: &str) -> Option<Arc<[f32]>> {
+        let at = self.0.iter().position(|(cached, _)| cached == text)?;
+        let entry = self.0.remove(at)?;
+        let vector = Arc::clone(&entry.1);
+        self.0.push_back(entry);
+
+        Some(vector)
+    }
+
+    fn insert(&mut self, text: &str, vector: Arc<[f32]>) {
+        if self.0.len() == QUERY_CACHE_SIZE {
+            self.0.pop_front();
+        }
+        self.0.push_back((text.to_owned(), vector));
     }
 }
 
@@ -222,7 +280,7 @@ impl Shared {
         while state.model.is_some() && state.generation == generation {
             let idle = state.last_used.elapsed();
             if idle >= self.idle_timeout {
-                state.model = None;
+                state.unload_model();
                 self.notify(ModelEvent::Unloaded);
                 return;
             }

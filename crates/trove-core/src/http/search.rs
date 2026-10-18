@@ -13,7 +13,9 @@ impl From<SearchError> for ApiError {
     fn from(error: SearchError) -> Self {
         let status = match error {
             SearchError::EmptyQuery | SearchError::ZeroLimit => StatusCode::BAD_REQUEST,
-            SearchError::Index(_) | SearchError::Embedder(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            SearchError::Index(_) | SearchError::Embedder(_) | SearchError::VectorScan(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         };
 
         Self::from_error(status, &error)

@@ -1,0 +1,5 @@
+---
+tags: [baking, bread]
+date: 2024-07-20
+---
+Bagels for the Saturday brunch slot at Mackie Mayor, July 2024 onwards. Dough is stiff, 57% hydration, 115 g balls, shaped with the thumb-through-the-middle method, cold retard 14 h at 4°C. Boiling: 4 L water, 2 tbsp barley malt syrup (Meridian, £3.50), 1 tsp bicarb, gentle simmer around 95°C, never a rolling boil, it wrinkles them. Boiling time is 45 seconds a side for chewy, 60 for the proper dense ones Tash likes, 90 if you want New York jaw workout. Max 4 in the pot or the water drops under 90°C and they go flabby. Float test before they go in: drop one in a glass of water, floats within 10 s means ready, sinks means 20 more min on the side. Seeds and salt straight after the boil while they're tacky. Bake 230°C for 18 min, flip at 6 min so the bottoms don't flatten. 24 per batch, sell at £2.80 with cream cheese, cost £0.38. The dough is closer to the stiff end of [[Pizza dough hydration]] than to bread, and sometimes I swap 10% of the yeast for [[Sourdough starter]].
