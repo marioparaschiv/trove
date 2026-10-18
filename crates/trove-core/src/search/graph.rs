@@ -7,8 +7,9 @@ use super::{Candidate, Query, SearchError, Signal, Stage};
 use crate::index::{self, Index};
 
 /// The graph's share of a blended score. Below one half, so the best direct match stays above anything the graph adds.
-/// The eval sets the final value.
-const GRAPH_SHARE: f32 = 0.3;
+/// Set by the eval: on the 300-note eval vault, MRR falls as the share grows (0.844 at 0.05, 0.843 at 0.1, 0.827 at
+/// 0.3), the linked notes it adds still showing up below the direct matches.
+const GRAPH_SHARE: f32 = 0.05;
 /// How much of the best note's PageRank another note needs to be added. On the fixture vault, with one note matching,
 /// a note it links to (or one linked from the same note) gets about 0.3, one sharing a tag with it 0.04 to 0.08, and
 /// one with no path to it none. The eval sets the final value.
