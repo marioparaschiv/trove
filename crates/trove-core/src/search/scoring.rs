@@ -188,3 +188,30 @@ impl Stage for Scoring<'_> {
         Ok(scored.into_iter().map(|(_, candidate)| candidate).collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::search::WEIGHTS;
+
+    #[test]
+    fn a_lookup_ranks_a_note_with_every_word_above_a_stronger_meaning_match() {
+        let exact = Signals {
+            best_z: 0.5,
+            next_z: 0.0,
+            coverage: Coverage {
+                share: 1.0,
+                weighted: 1.0,
+                in_title: 0.0,
+            },
+        };
+        let meaning = Signals {
+            best_z: 3.5,
+            next_z: 0.0,
+            coverage: Coverage::default(),
+        };
+
+        assert!(WEIGHTS.score(&exact, true) > WEIGHTS.score(&meaning, true));
+        assert!(WEIGHTS.score(&exact, false) < WEIGHTS.score(&meaning, false));
+    }
+}

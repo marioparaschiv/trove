@@ -408,9 +408,9 @@ mod tests {
     /// Answers that win by their rare words but lose by meaning to notes with fewer of them.
     fn examples() -> Vec<Example> {
         [
-            (3.0, 1.0, 4.0, 0.5),
-            (2.5, 0.9, 3.5, 0.4),
-            (4.0, 0.8, 4.5, 0.2),
+            (3.0, 1.0, 5.0, 0.4),
+            (2.5, 0.9, 4.5, 0.3),
+            (4.0, 0.8, 6.0, 0.2),
         ]
         .into_iter()
         .map(|(z, words, other_z, other_words)| Example {

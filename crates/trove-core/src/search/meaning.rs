@@ -139,15 +139,15 @@ mod tests {
 
     #[test]
     fn a_short_query_is_expanded_with_its_best_chunks_that_stand_out() {
-        let scores = [(10, 0.4), (11, 3.1), (12, 2.6), (13, -0.2), (14, 2.0)];
+        let scores = [(10, 0.4), (11, 2.6), (12, 3.1), (13, -0.2), (14, 2.0)];
 
-        assert_eq!(feedback_rows(&words::terms("knee physio"), &scores), [1]);
+        assert_eq!(feedback_rows(&words::terms("knee physio"), &scores), [2]);
         assert_eq!(
             feedback_rows(
                 &words::terms("which knee exercises did the physio give me"),
                 &scores
             ),
-            [1]
+            [2]
         );
     }
 
@@ -170,7 +170,7 @@ mod tests {
     fn the_expanded_query_moves_towards_the_chunks_and_stays_unit_length() {
         let expanded = expanded(&[1.0, 0.0], &[vec![0.0, 1.0]], 0.2);
 
-        assert!(expanded[0] > expanded[1] && expanded[1] > 0.0);
+        assert!((expanded[1] / expanded[0] - 0.25).abs() < 1e-6);
         assert!((expanded.iter().map(|value| value * value).sum::<f32>() - 1.0).abs() < 1e-6);
     }
 }

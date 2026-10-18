@@ -90,6 +90,10 @@ fn a_word_typed_as_in_a_note_matches_only_that_word_not_words_like_it() {
             "Cart.md",
             "# Cart\n\nThe shopping cart has a squeaky wheel.\n",
         ),
+        (
+            "Catalogue.md",
+            "# Seeds\n\nThe seed catalogue came in the post.\n",
+        ),
     ]);
     let data_dir = indexed(vault.path());
 

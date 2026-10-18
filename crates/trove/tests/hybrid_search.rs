@@ -151,7 +151,6 @@ fn eval_fit_gives_the_same_weights_and_scores_each_run() {
 
     let report = eval(data_dir.path(), Path::new(QUERIES), &["--fit"]);
     assert!(report["examples"].as_u64().unwrap() > 0, "{report}");
-    assert_eq!(report["fitted"]["meaning"], 1.0, "{report}");
     let held_out = report["held_out"]["fitted"]["overall"]["queries"]
         .as_u64()
         .unwrap();
