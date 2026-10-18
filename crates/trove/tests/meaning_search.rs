@@ -103,7 +103,7 @@ fn a_note_matching_in_several_sections_ranks_above_one_with_a_single_closer_para
     // Its Saturday matches the query better than any one section above.
     fs::write(
         vault.path().join("Weekend notes.md"),
-        "# Weekend notes\n\n## Saturday\n\nWent on a sea kayak trip: paddled along the coast to the sea caves and \
+        "# Weekend notes\n\n## Saturday\n\nWent on a kayak trip: paddled along the coast to the sea caves and \
          back, about twelve kilometres.\n\n## Shopping\n\nNeed batteries, dish soap, a new kettle descaler and \
          stamps.\n\n## Car\n\nThe rear tyre is losing pressure again; book the garage for a puncture repair.\n",
     )
