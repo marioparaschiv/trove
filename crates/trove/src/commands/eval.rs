@@ -1,8 +1,14 @@
-use std::{collections::BTreeMap, fs, path::PathBuf};
+mod fit;
+
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context as _, bail};
 use serde::{Deserialize, Serialize};
-use trove_core::search::SearchRequest;
+use trove_core::search::{SearchRequest, SearchResponse};
 
 use super::Context;
 use crate::searcher::{Searcher, StageSwitches};
@@ -19,6 +25,10 @@ pub struct Args {
     /// Also write the scores and each query's rank to this file as JSON, to diff runs
     #[arg(long)]
     out: Option<PathBuf>,
+    /// Instead, fit the ranking weights on two thirds of the queries and score them against the compiled ones on the
+    /// other third and on all
+    #[arg(long)]
+    fit: bool,
     #[command(flatten)]
     stages: StageSwitches,
 }
@@ -140,56 +150,82 @@ struct Summary<'a> {
 pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
     let queries = read_queries(&args)
         .with_context(|| format!("failed to read queries from {}", args.queries.display()))?;
-    let searcher = Searcher::connect(ctx)?;
     let skip = args.stages.skip();
+    if args.fit {
+        if !skip.is_empty() {
+            bail!("--fit searches with every stage");
+        }
+        return fit::run(ctx, &queries, args.out.as_deref());
+    }
 
-    let mut outcomes = Vec::with_capacity(queries.len());
-    for eval_query in &queries {
-        let response = searcher
-            .search(&SearchRequest {
-                query: eval_query.query.clone(),
-                limit: Some(DEPTH),
-                skip: skip.clone(),
-            })
-            .with_context(|| format!("failed to search for {:?}", eval_query.query))?;
-        let note = eval_query.expected.note();
-        let rank = note.and_then(|note| {
-            response
-                .results
-                .iter()
-                .position(|result| result.path == note)
-                .map(|place| place + 1)
-        });
-        let outcome = QueryOutcome {
-            query: &eval_query.query,
-            kind: eval_query.expected.kind(),
-            lang: &eval_query.lang,
-            note,
-            rank,
-            results: response.results.len(),
-        };
-
-        let shown = match (note, rank) {
-            (Some(_), Some(rank)) => rank.to_string(),
-            (Some(_), None) => "-".to_owned(),
-            (None, _) if outcome.results == 0 => "ok".to_owned(),
-            (None, _) => format!("+{}", outcome.results),
-        };
-        println!(
-            "{shown:>3}  {:<10} {:<3} {}",
-            outcome.kind, outcome.lang, outcome.query
-        );
-        outcomes.push(outcome);
+    let searcher = Searcher::connect(ctx)?;
+    let outcomes = outcomes(&queries, |query| {
+        searcher.search(&SearchRequest {
+            query: query.to_owned(),
+            limit: Some(DEPTH),
+            skip: skip.clone(),
+        })
+    })?;
+    for outcome in &outcomes {
+        print_outcome(outcome);
     }
 
     let summary = summarize(outcomes);
     print_summary(&summary);
     if let Some(out) = &args.out {
-        let json = serde_json::to_vec_pretty(&summary)?;
-        fs::write(out, json).with_context(|| format!("failed to write {}", out.display()))?;
+        write_json(out, &summary)?;
     }
 
     Ok(())
+}
+
+/// Where each query's note is in what `search` finds for it.
+fn outcomes<'a>(
+    queries: impl IntoIterator<Item = &'a EvalQuery>,
+    mut search: impl FnMut(&str) -> anyhow::Result<SearchResponse>,
+) -> anyhow::Result<Vec<QueryOutcome<'a>>> {
+    queries
+        .into_iter()
+        .map(|eval_query| {
+            let response = search(&eval_query.query)
+                .with_context(|| format!("failed to search for {:?}", eval_query.query))?;
+            let note = eval_query.expected.note();
+            let rank = note.and_then(|note| {
+                response
+                    .results
+                    .iter()
+                    .position(|result| result.path == note)
+                    .map(|place| place + 1)
+            });
+
+            Ok(QueryOutcome {
+                query: &eval_query.query,
+                kind: eval_query.expected.kind(),
+                lang: &eval_query.lang,
+                note,
+                rank,
+                results: response.results.len(),
+            })
+        })
+        .collect()
+}
+
+fn print_outcome(outcome: &QueryOutcome<'_>) {
+    let shown = match (outcome.note, outcome.rank) {
+        (Some(_), Some(rank)) => rank.to_string(),
+        (Some(_), None) => "-".to_owned(),
+        (None, _) if outcome.results == 0 => "ok".to_owned(),
+        (None, _) => format!("+{}", outcome.results),
+    };
+    println!(
+        "{shown:>3}  {:<10} {:<3} {}",
+        outcome.kind, outcome.lang, outcome.query
+    );
+}
+
+fn write_json(out: &Path, value: &impl Serialize) -> anyhow::Result<()> {
+    let json = serde_json::to_vec_pretty(value)?;
+    fs::write(out, json).with_context(|| format!("failed to write {}", out.display()))
 }
 
 fn read_queries(args: &Args) -> anyhow::Result<Vec<EvalQuery>> {

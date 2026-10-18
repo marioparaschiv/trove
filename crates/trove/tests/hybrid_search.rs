@@ -145,6 +145,29 @@ fn eval_scores_the_fixture_queries() {
 }
 
 #[test]
+fn eval_fit_gives_the_same_weights_and_scores_each_run() {
+    let vault = vault_copy();
+    let data_dir = indexed(vault.path());
+
+    let report = eval(data_dir.path(), Path::new(QUERIES), &["--fit"]);
+    assert!(report["examples"].as_u64().unwrap() > 0, "{report}");
+    assert_eq!(report["fitted"]["meaning"], 1.0, "{report}");
+    let held_out = report["held_out"]["fitted"]["overall"]["queries"]
+        .as_u64()
+        .unwrap();
+    assert!((1..20).contains(&held_out), "{report}");
+    assert_eq!(
+        report["all"]["fitted"]["overall"]["queries"], 20,
+        "{report}"
+    );
+
+    assert_eq!(
+        eval(data_dir.path(), Path::new(QUERIES), &["--fit"]),
+        report
+    );
+}
+
+#[test]
 fn eval_counts_a_no_answer_query_as_a_hit_when_nothing_is_found() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());

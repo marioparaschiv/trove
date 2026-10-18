@@ -1,8 +1,10 @@
 mod collapse;
+pub mod features;
 mod graph;
 mod meaning;
 mod request;
 mod scoring;
+mod weights;
 mod words;
 
 use std::{collections::BTreeSet, fmt};
@@ -17,8 +19,12 @@ pub(crate) use collapse::CollapseToNotes;
 pub(crate) use graph::GraphRerank;
 pub(crate) use meaning::Meaning;
 pub(crate) use request::results;
-pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
+pub use request::{
+    DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search, search_with,
+};
 pub(crate) use scoring::Scoring;
+pub use scoring::Signals;
+pub use weights::{WEIGHTS, Weights};
 pub(crate) use words::Words;
 
 pub struct Query {
@@ -63,6 +69,8 @@ pub struct Coverage {
     pub share: f32,
     /// The share with each word weighted by how few notes have it, which ranks the notes that match.
     pub weighted: f32,
+    /// The weighted share of the query's words in the note's title; 0 when titles aren't read ([`Weights::title`]).
+    pub in_title: f32,
 }
 
 #[derive(Debug, Error)]

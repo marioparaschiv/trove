@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 
 use super::{
     Candidate, CollapseToNotes, GraphRerank, Meaning, Pipeline, Query, Scoring, SearchError,
-    Signal, Stage, Words,
+    Signal, Stage, WEIGHTS, Weights, Words,
 };
 use crate::{
     embedder::Embedder,
@@ -57,6 +57,16 @@ pub fn search(
     embedder: &Embedder,
     request: &SearchRequest,
 ) -> Result<SearchResponse, SearchError> {
+    search_with(index, embedder, request, WEIGHTS)
+}
+
+/// [`search`] ranking by `weights` instead of [`WEIGHTS`], for the eval to fit them.
+pub fn search_with(
+    index: &Mutex<Index>,
+    embedder: &Embedder,
+    request: &SearchRequest,
+    weights: Weights,
+) -> Result<SearchResponse, SearchError> {
     let text = request.query.trim();
     if text.is_empty() {
         return Err(SearchError::EmptyQuery);
@@ -68,14 +78,14 @@ pub fn search(
 
     let mut stages: Vec<Box<dyn Stage>> = Vec::new();
     if !request.skip.contains(&Signal::Meaning) {
-        stages.push(Box::new(Meaning::new(index, embedder)));
+        stages.push(Box::new(Meaning::new(index, embedder, weights.feedback)));
     }
     if !request.skip.contains(&Signal::Words) {
-        stages.push(Box::new(Words::new(index)));
+        stages.push(Box::new(Words::new(index, weights.title != 0.0)));
     }
-    stages.push(Box::new(Scoring::new(index)));
+    stages.push(Box::new(Scoring::new(index, weights)));
     if !request.skip.contains(&Signal::Graph) {
-        stages.push(Box::new(GraphRerank::new(index)));
+        stages.push(Box::new(GraphRerank::new(index, weights.graph_share)));
     }
     stages.push(Box::new(CollapseToNotes::new(index)));
 

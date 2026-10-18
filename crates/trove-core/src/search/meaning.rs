@@ -13,9 +13,6 @@ const FEEDBACK_MAX_WORDS: usize = 5;
 /// How many of the best chunks the query is expanded with. On the eval, the second and third best pull the query off
 /// its topic as often as not.
 const FEEDBACK_CHUNKS: usize = 1;
-/// How much the mean of those chunks counts in the expanded query, the query itself the rest. Tuned on the eval (0.1
-/// and 0.3 rank a little worse).
-const FEEDBACK_WEIGHT: f32 = 0.2;
 
 /// Search by meaning: the query's cosine similarity to every chunk, put on this query's own scale (z-scores), so that
 /// scoring can tell the chunks that clearly stand out and a query that matches nothing finds nothing. Adds every chunk
@@ -26,11 +23,17 @@ const FEEDBACK_WEIGHT: f32 = 0.2;
 pub struct Meaning<'a> {
     index: &'a Mutex<Index>,
     embedder: &'a Embedder,
+    /// [`Weights::feedback`](super::Weights::feedback).
+    feedback: f32,
 }
 
 impl<'a> Meaning<'a> {
-    pub fn new(index: &'a Mutex<Index>, embedder: &'a Embedder) -> Self {
-        Self { index, embedder }
+    pub fn new(index: &'a Mutex<Index>, embedder: &'a Embedder, feedback: f32) -> Self {
+        Self {
+            index,
+            embedder,
+            feedback,
+        }
     }
 }
 
@@ -49,7 +52,7 @@ impl Stage for Meaning<'_> {
         let mut scores = z_scores(index.chunk_scores(&query_vector)?);
         let rows = feedback_rows(&words::terms(&query.text), &scores);
         if !rows.is_empty() {
-            let expanded = expanded(&query_vector, &index.chunk_vectors(&rows)?);
+            let expanded = expanded(&query_vector, &index.chunk_vectors(&rows)?, self.feedback);
             scores = z_scores(index.chunk_scores(&expanded)?);
         }
         drop(index);
@@ -111,13 +114,10 @@ fn feedback_rows(terms: &[String], scores: &[(i64, f32)]) -> Vec<usize> {
     rows
 }
 
-/// The query moved towards the mean of `vectors` by [`FEEDBACK_WEIGHT`], back to unit length.
-fn expanded(query: &[f32], vectors: &[Vec<f32>]) -> Vec<f32> {
-    let share = FEEDBACK_WEIGHT / vectors.len() as f32;
-    let mut expanded: Vec<f32> = query
-        .iter()
-        .map(|value| (1.0 - FEEDBACK_WEIGHT) * value)
-        .collect();
+/// The query moved towards the mean of `vectors` by `weight`, back to unit length.
+fn expanded(query: &[f32], vectors: &[Vec<f32>], weight: f32) -> Vec<f32> {
+    let share = weight / vectors.len() as f32;
+    let mut expanded: Vec<f32> = query.iter().map(|value| (1.0 - weight) * value).collect();
     for vector in vectors {
         for (value, added) in expanded.iter_mut().zip(vector) {
             *value += share * added;
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn the_expanded_query_moves_towards_the_chunks_and_stays_unit_length() {
-        let expanded = expanded(&[1.0, 0.0], &[vec![0.0, 1.0]]);
+        let expanded = expanded(&[1.0, 0.0], &[vec![0.0, 1.0]], 0.2);
 
         assert!(expanded[0] > expanded[1] && expanded[1] > 0.0);
         assert!((expanded.iter().map(|value| value * value).sum::<f32>() - 1.0).abs() < 1e-6);

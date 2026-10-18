@@ -130,11 +130,13 @@ const TWO_SLIP_CHARS: usize = 8;
 /// Japanese or Thai as a run of characters inside longer text, and a misspelt word as the closest word in the index.
 pub struct Words<'a> {
     index: &'a Mutex<Index>,
+    /// Whether to find which of the query's words are in each note's title ([`Coverage::in_title`]).
+    titles: bool,
 }
 
 impl<'a> Words<'a> {
-    pub fn new(index: &'a Mutex<Index>) -> Self {
-        Self { index }
+    pub fn new(index: &'a Mutex<Index>, titles: bool) -> Self {
+        Self { index, titles }
     }
 }
 
@@ -161,6 +163,15 @@ impl Stage for Words<'_> {
         let conn = index.connection();
         let patterns = patterns(conn, &terms)?;
 
+        let notes_by_title_word: Vec<HashSet<i64>> = if self.titles {
+            patterns
+                .iter()
+                .map(|pattern| notes_with_in_title(conn, pattern))
+                .collect::<rusqlite::Result<_>>()?
+        } else {
+            Vec::new()
+        };
+
         let mut word_patterns = Vec::new();
         let mut substring_matches = Vec::new();
         for pattern in patterns {
@@ -183,7 +194,7 @@ impl Stage for Words<'_> {
                 .iter()
                 .map(|chunks| chunks.iter().map(|&(_, file_id)| file_id).collect()),
         );
-        let coverage = coverage(conn, &notes_by_word)?;
+        let coverage = coverage(conn, &notes_by_word, &notes_by_title_word)?;
 
         let mut matched = Vec::new();
         if !word_patterns.is_empty() {
@@ -218,12 +229,13 @@ impl Stage for Words<'_> {
     }
 }
 
-/// How much of the query each note has, from the notes each of the query's words is in. A word weighs its inverse
-/// document frequency over notes (BM25's), so a note with "sumac" ranks above one with only "recipe" for "recipe with
-/// sumac".
+/// How much of the query each note has, from the notes each of the query's words is in, and in their title (empty when
+/// titles aren't read). A word weighs its inverse document frequency over notes (BM25's), so a note with "sumac" ranks
+/// above one with only "recipe" for "recipe with sumac".
 fn coverage(
     conn: &Connection,
     notes_by_word: &[HashSet<i64>],
+    notes_by_title_word: &[HashSet<i64>],
 ) -> rusqlite::Result<HashMap<i64, Coverage>> {
     let notes: f32 = conn.query_row("SELECT count(*) FROM files", [], |row| row.get(0))?;
     let weights: Vec<f32> = notes_by_word
@@ -235,21 +247,29 @@ fn coverage(
         .collect();
     let total_weight: f32 = weights.iter().sum();
 
-    let mut found: HashMap<i64, (usize, f32)> = HashMap::new();
+    let mut found: HashMap<i64, (usize, f32, f32)> = HashMap::new();
     for (with, weight) in notes_by_word.iter().zip(&weights) {
         for &file_id in with {
-            let (words, words_weight) = found.entry(file_id).or_default();
+            let (words, words_weight, _) = found.entry(file_id).or_default();
             *words += 1;
             *words_weight += weight;
+        }
+    }
+    for (with, weight) in notes_by_title_word.iter().zip(&weights) {
+        for file_id in with {
+            if let Some((_, _, title_weight)) = found.get_mut(file_id) {
+                *title_weight += weight;
+            }
         }
     }
 
     Ok(found
         .into_iter()
-        .map(|(file_id, (words, words_weight))| {
+        .map(|(file_id, (words, words_weight, title_weight))| {
             let coverage = Coverage {
                 share: words as f32 / notes_by_word.len() as f32,
                 weighted: words_weight / total_weight,
+                in_title: title_weight / total_weight,
             };
             (file_id, coverage)
         })
@@ -335,6 +355,26 @@ fn substring_chunks(conn: &Connection, run: &str) -> rusqlite::Result<Vec<(i64, 
 
     conn.prepare(sql)?
         .query_map([parameter], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect()
+}
+
+/// The notes with `pattern` in their title.
+fn notes_with_in_title(conn: &Connection, pattern: &Pattern) -> rusqlite::Result<HashSet<i64>> {
+    let (sql, parameter) = match pattern {
+        Pattern::Words(words) => (
+            "SELECT DISTINCT c.file_id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+             WHERE chunks_fts MATCH ?1",
+            format!("{{title}} : {words}"),
+        ),
+        Pattern::Substring(run) => (
+            "SELECT DISTINCT c.file_id FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+             WHERE instr(chunks_fts.title, ?1)",
+            run.clone(),
+        ),
+    };
+
+    conn.prepare_cached(sql)?
+        .query_map([parameter], |row| row.get(0))?
         .collect()
 }
 

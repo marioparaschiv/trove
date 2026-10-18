@@ -6,10 +6,6 @@ use std::{
 use super::{Candidate, Query, SearchError, Signal, Stage};
 use crate::index::{self, Index};
 
-/// The graph's share of a blended score. Below one half, so the best direct match stays above anything the graph adds.
-/// Set by the eval: on the 300-note eval vault, MRR falls as the share grows (0.844 at 0.05, 0.843 at 0.1, 0.827 at
-/// 0.3), the linked notes it adds still showing up below the direct matches.
-const GRAPH_SHARE: f32 = 0.05;
 /// How much of the best note's PageRank another note needs to be added. On the fixture vault, with one note matching,
 /// a note it links to (or one linked from the same note) gets about 0.3, one sharing a tag with it 0.04 to 0.08, and
 /// one with no path to it none. The eval sets the final value.
@@ -22,11 +18,13 @@ const MIN_RANK: f32 = 0.025;
 /// heading or block a link names.
 pub struct GraphRerank<'a> {
     index: &'a Mutex<Index>,
+    /// [`Weights::graph_share`](super::Weights::graph_share).
+    share: f32,
 }
 
 impl<'a> GraphRerank<'a> {
-    pub fn new(index: &'a Mutex<Index>) -> Self {
-        Self { index }
+    pub fn new(index: &'a Mutex<Index>, share: f32) -> Self {
+        Self { index, share }
     }
 }
 
@@ -73,8 +71,8 @@ impl Stage for GraphRerank<'_> {
             let rank = note_of(candidate.chunk_id)
                 .and_then(|file_id| notes.get(&file_id))
                 .map_or(0.0, |note| note.rank);
-            candidate.score = (1.0 - GRAPH_SHARE) * candidate.score / best_score
-                + GRAPH_SHARE * rank / best_note_rank;
+            candidate.score = (1.0 - self.share) * candidate.score / best_score
+                + self.share * rank / best_note_rank;
         }
 
         for (file_id, note) in notes {
@@ -88,7 +86,7 @@ impl Stage for GraphRerank<'_> {
 
             candidates.push(Candidate {
                 chunk_id,
-                score: GRAPH_SHARE * relative,
+                score: self.share * relative,
                 why: BTreeSet::from([Signal::Graph]),
                 coverage: None,
             });
