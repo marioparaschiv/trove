@@ -2,7 +2,13 @@
 //! queries go through the same [`normalized`]. Ported from DigUp's `SearchText` (see THIRD_PARTY_NOTICES.md).
 
 use rusqlite::Statement;
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+
+/// Whether `c` is part of a word, as the tokenizer splits text: letters, digits and marks, so that a vowel sign or a
+/// virama stays inside its word.
+pub(crate) fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || is_combining_mark(c)
+}
 
 /// NFKC (Arabic presentation forms and ligatures become plain letters, full-width becomes ASCII), invisible formatting
 /// characters dropped (zero-width joiners, direction marks, soft hyphens), a zero-width space read as a word break

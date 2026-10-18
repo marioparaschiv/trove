@@ -15,7 +15,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const STORE_FOLDER: &str = ".trove";
-const PARAPHRASE: &str = "how to keep my bread culture alive";
+const PARAPHRASE: &str = "how to look after my bread culture";
 const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
 const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
 /// Where a vector file holds its `vector_version`: after the 8-byte magic and the 4-byte format version.

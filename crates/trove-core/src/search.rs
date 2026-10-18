@@ -1,8 +1,8 @@
 mod collapse;
-mod fusion;
 mod graph;
 mod meaning;
 mod request;
+mod scoring;
 mod words;
 
 use std::{collections::BTreeSet, fmt};
@@ -14,11 +14,11 @@ use utoipa::ToSchema;
 use crate::{embedder::EmbedderError, index::VectorScanError};
 
 pub(crate) use collapse::CollapseToNotes;
-pub(crate) use fusion::Fusion;
 pub(crate) use graph::GraphRerank;
 pub(crate) use meaning::Meaning;
 pub(crate) use request::results;
 pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search};
+pub(crate) use scoring::Scoring;
 pub(crate) use words::Words;
 
 pub struct Query {

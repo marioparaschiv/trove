@@ -25,21 +25,7 @@ impl Stage for CollapseToNotes<'_> {
             return Ok(candidates);
         }
 
-        let chunk_ids: Vec<i64> = candidates
-            .iter()
-            .map(|candidate| candidate.chunk_id)
-            .collect();
-        let notes: HashMap<i64, i64> = {
-            let index = index::lock(self.index);
-            let mut statement = index.connection().prepare(
-                "SELECT id, file_id FROM chunks WHERE id IN (SELECT value FROM json_each(?1))",
-            )?;
-            statement
-                .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?
-                .collect::<Result<_, _>>()?
-        };
+        let notes = note_ids(&index::lock(self.index), &candidates)?;
 
         candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
         let mut places: HashMap<i64, usize> = HashMap::new();
@@ -60,4 +46,24 @@ impl Stage for CollapseToNotes<'_> {
 
         Ok(collapsed)
     }
+}
+
+/// The note of each candidate's chunk, by chunk id.
+pub(super) fn note_ids(
+    index: &Index,
+    candidates: &[Candidate],
+) -> rusqlite::Result<HashMap<i64, i64>> {
+    let chunk_ids: Vec<i64> = candidates
+        .iter()
+        .map(|candidate| candidate.chunk_id)
+        .collect();
+    let mut statement = index
+        .connection()
+        .prepare("SELECT id, file_id FROM chunks WHERE id IN (SELECT value FROM json_each(?1))")?;
+
+    statement
+        .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect()
 }

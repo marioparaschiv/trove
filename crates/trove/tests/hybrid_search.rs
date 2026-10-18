@@ -12,7 +12,7 @@ const IDENTIFIER: &str = "7Q4K-29XP";
 const IDENTIFIER_NOTE: &str = "Home/Boiler service.md";
 
 /// Shares no word with its note, so only meaning finds it.
-const PARAPHRASE: &str = "how to keep my bread culture alive";
+const PARAPHRASE: &str = "how to look after my bread culture";
 const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
 
 fn search(data_dir: &Path, query: &str, switches: &[&str]) -> Value {

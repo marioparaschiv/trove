@@ -82,7 +82,7 @@ fn notes_linked_from_the_match_are_found_by_the_graph_and_only_with_it() {
 
     let response = search(data_dir.path(), &[]);
     assert_eq!(response["results"][0]["path"], HUB, "{response}");
-    assert_eq!(response["results"][0]["why"], json!(["meaning"]));
+    assert_eq!(response["results"][0]["why"], json!(["meaning", "words"]));
     for target in &TARGETS {
         assert_found_by_graph(&response, target);
     }
