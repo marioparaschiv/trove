@@ -127,3 +127,41 @@ fn editing_a_note_changes_only_its_own_edges() {
         assert_found_by_graph(&response, target);
     }
 }
+
+#[test]
+fn a_note_linked_while_the_service_runs_is_found_by_the_next_search() {
+    let vault = vault_copy();
+    let serve = Serve::start_indexed(indexed(vault.path()));
+    let search = || {
+        let (status, response) = serve.call(
+            "POST",
+            "/search",
+            Some(&json!({ "query": HUB_QUERY, "limit": 20 })),
+        );
+        assert_eq!(status, 200, "{response}");
+        response
+    };
+    let kites = Target {
+        note: "Hobbies/Kites.md",
+        heading_path: &["Kites"],
+    };
+    assert!(result(&search(), kites.note).is_none());
+
+    fs::write(
+        vault.path().join(kites.note),
+        "# Kites\n\nA delta kite climbs best in a steady breeze of about 15 km/h.\n",
+    )
+    .unwrap();
+    let hub = vault.path().join(HUB);
+    let text = fs::read_to_string(&hub).unwrap();
+    fs::write(
+        &hub,
+        text.replace("[[Kyoto#Arashiyama]]", "[[Kyoto#Arashiyama]], [[Kites]]"),
+    )
+    .unwrap();
+    let (status, report) = serve.call("POST", "/index", Some(&json!({})));
+    assert_eq!(status, 200, "{report}");
+
+    assert_found_by_graph(&search(), &kites);
+    serve.stop();
+}

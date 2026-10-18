@@ -4,13 +4,13 @@ mod vectors;
 
 use std::{
     path::PathBuf,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use thiserror::Error;
 
-use crate::data_dir::DataDir;
+use crate::{data_dir::DataDir, graph::VaultGraph};
 
 pub use sources::{Source, SourceError};
 pub use stats::IndexStats;
@@ -24,6 +24,17 @@ const SCHEMA: &str = include_str!("index/schema.sql");
 /// The local index: a rebuildable SQLite cache in the data folder.
 pub struct Index {
     conn: Connection,
+    /// The graph search reranks with, and the index version it was loaded at.
+    graph: Option<(Version, Arc<VaultGraph>)>,
+}
+
+/// Changes whenever anything writes to the index, through this connection or another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Version {
+    /// Rows this connection has changed since it opened.
+    total_changes: u64,
+    /// SQLite's `data_version`, which changes when another connection commits.
+    data_version: i64,
 }
 
 #[derive(Debug, Error)]
@@ -82,7 +93,7 @@ impl Index {
         }
         tx.commit()?;
 
-        Ok(Self { conn })
+        Ok(Self { conn, graph: None })
     }
 
     pub fn schema_version(&self) -> Result<u32, IndexError> {
@@ -99,6 +110,30 @@ impl Index {
 
     pub(crate) fn connection(&self) -> &Connection {
         &self.conn
+    }
+
+    /// The whole vault graph, loaded again only when the index has changed since it was last loaded.
+    pub(crate) fn graph(&mut self) -> rusqlite::Result<Arc<VaultGraph>> {
+        let version = self.version()?;
+        if let Some((loaded_at, graph)) = &self.graph
+            && *loaded_at == version
+        {
+            return Ok(Arc::clone(graph));
+        }
+
+        let graph = Arc::new(VaultGraph::load(&self.conn)?);
+        self.graph = Some((version, Arc::clone(&graph)));
+
+        Ok(graph)
+    }
+
+    fn version(&self) -> rusqlite::Result<Version> {
+        Ok(Version {
+            total_changes: self.conn.total_changes(),
+            data_version: self
+                .conn
+                .pragma_query_value(None, "data_version", |row| row.get(0))?,
+        })
     }
 
     fn meta<T: rusqlite::types::FromSql>(&self, key: &str) -> rusqlite::Result<T> {

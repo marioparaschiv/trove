@@ -4,10 +4,7 @@ use std::{
 };
 
 use super::{Candidate, Query, SearchError, Signal, Stage};
-use crate::{
-    graph::VaultGraph,
-    index::{self, Index},
-};
+use crate::index::{self, Index};
 
 /// The graph's share of a blended score. Below one half, so the best direct match stays above anything the graph adds.
 /// The eval sets the final value.
@@ -46,7 +43,7 @@ impl Stage for GraphRerank<'_> {
             return Ok(candidates);
         }
 
-        let graph = VaultGraph::load(index::lock(self.index).connection())?;
+        let graph = index::lock(self.index).graph()?;
         let seeds: Vec<(usize, f32)> = candidates
             .iter()
             .filter_map(|candidate| {
@@ -98,5 +95,68 @@ impl Stage for GraphRerank<'_> {
         candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
 
         Ok(candidates)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
+
+    use super::*;
+    use crate::{
+        data_dir::DataDir,
+        embedder::Embedder,
+        search::{SearchRequest, search},
+    };
+
+    const NOTES: &str = "
+        INSERT INTO sources (id, path) VALUES (1, '/vault');
+        INSERT INTO files (id, source_id, path, mtime, hash, title, properties)
+        VALUES (1, 1, 'Bread.md', 0, x'01', 'Bread', '{}'), (2, 1, 'Flour.md', 0, x'02', 'Flour', '{}');
+        INSERT INTO chunks (id, file_id, ordinal, heading_path, span_start, span_end, text_hash)
+        VALUES (1, 1, 0, '', 0, 9, x'01'), (2, 2, 0, '', 0, 5, x'02');
+        INSERT INTO chunks_fts (rowid, title, heading_path, text)
+        VALUES (1, 'Bread', '', 'sourdough'), (2, 'Flour', '', 'flour');
+        INSERT INTO edges (src, dst, kind, weight) VALUES ('note:1', 'link:Flour', 'link', 1.0);
+    ";
+
+    #[test]
+    fn repeated_searches_reuse_the_loaded_graph_until_the_index_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = Mutex::new(Index::open(&DataDir::at(temp.path().to_owned()).unwrap()).unwrap());
+        index::lock(&index)
+            .connection()
+            .execute_batch(NOTES)
+            .unwrap();
+        // Never loaded: the searches leave out meaning.
+        let embedder = Embedder::new(PathBuf::from("no model"), Duration::from_secs(1));
+        let request = SearchRequest {
+            query: "sourdough".to_owned(),
+            limit: None,
+            skip: BTreeSet::from([Signal::Meaning]),
+        };
+
+        let paths = |index: &Mutex<Index>| -> Vec<String> {
+            search(index, &embedder, &request)
+                .unwrap()
+                .results
+                .into_iter()
+                .map(|result| result.path)
+                .collect()
+        };
+        assert_eq!(paths(&index), ["Bread.md", "Flour.md"]);
+        let loaded = index::lock(&index).graph().unwrap();
+        assert_eq!(paths(&index), ["Bread.md", "Flour.md"]);
+        assert!(Arc::ptr_eq(&loaded, &index::lock(&index).graph().unwrap()));
+
+        index::lock(&index)
+            .connection()
+            .execute(
+                "INSERT INTO edges (src, dst, kind, weight) VALUES ('note:2', 'tag:baking', 'tag', 1.0)",
+                [],
+            )
+            .unwrap();
+        search(&index, &embedder, &request).unwrap();
+        assert!(!Arc::ptr_eq(&loaded, &index::lock(&index).graph().unwrap()));
     }
 }
