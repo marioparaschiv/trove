@@ -94,6 +94,9 @@ fn base_config(source: &Path) -> cmake::Config {
     config
         .profile("Release")
         .define("GGML_NATIVE", "OFF")
+        // ggml's own worker threads start from the thread that embeds, so a background embedding's lowered priority
+        // reaches them. OpenMP's threads are its own and keep whatever priority they were last given.
+        .define("GGML_OPENMP", "OFF")
         .define("LLAMA_BUILD_COMMON", "OFF")
         .define("LLAMA_BUILD_TESTS", "OFF")
         .define("LLAMA_BUILD_TOOLS", "OFF")
@@ -145,12 +148,16 @@ fn build_static_metal(source: &Path) {
     println!("cargo:rustc-link-lib=dylib=c++");
 }
 
-/// Shared libraries with every CPU variant as a backend module loaded at run time, so one build runs on any CPU.
+/// Shared libraries with every CPU variant and Vulkan as backend modules loaded at run time, so one build runs on any
+/// CPU, and on the GPU where a Vulkan driver is installed.
 fn build_shared_with_runtime_backends(source: &Path, out_dir: &Path) {
+    require_vulkan_sdk();
+
     let install = base_config(source)
         .define("BUILD_SHARED_LIBS", "ON")
         .define("GGML_BACKEND_DL", "ON")
         .define("GGML_CPU_ALL_VARIANTS", "ON")
+        .define("GGML_VULKAN", "ON")
         // `llama` needs `ggml` beside it; a binary's RUNPATH doesn't apply to its libraries' own dependencies.
         .define("CMAKE_INSTALL_RPATH", "$ORIGIN")
         .build();
@@ -182,6 +189,43 @@ fn build_shared_with_runtime_backends(source: &Path, out_dir: &Path) {
             });
         }
     }
+}
+
+/// Fails with one message naming what to install, instead of the CMake error deep in ggml's Vulkan build.
+fn require_vulkan_sdk() {
+    println!("cargo:rerun-if-env-changed=VULKAN_SDK");
+    let sdk = env::var_os("VULKAN_SDK").map(PathBuf::from);
+    let mut include_dirs: Vec<PathBuf> = sdk.iter().map(|sdk| sdk.join("include")).collect();
+    include_dirs.extend(["/usr/include", "/usr/local/include"].map(PathBuf::from));
+    let has_header = |header: &str| include_dirs.iter().any(|dir| dir.join(header).is_file());
+
+    // CMake looks in the SDK first, then on PATH.
+    let glslc = sdk
+        .iter()
+        .map(|sdk| sdk.join("bin").join("glslc"))
+        .find(|glslc| glslc.with_extension(env::consts::EXE_EXTENSION).is_file())
+        .unwrap_or_else(|| PathBuf::from("glslc"));
+    let has_glslc = Command::new(&glslc)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+
+    let missing: Vec<&str> = [
+        (has_header("vulkan/vulkan.h"), "the Vulkan headers"),
+        (has_header("spirv/unified1/spirv.hpp"), "SPIRV-Headers"),
+        (has_glslc, "glslc"),
+    ]
+    .into_iter()
+    .filter_map(|(found, name)| (!found).then_some(name))
+    .collect();
+
+    assert!(
+        missing.is_empty(),
+        "building llama.cpp's Vulkan backend needs the Vulkan SDK with glslc, but {} were not found. Install the \
+         Vulkan SDK from https://vulkan.lunarg.com/sdk/home and set VULKAN_SDK to it (on Debian or Ubuntu, \
+         `sudo apt-get install libvulkan-dev spirv-headers glslc` instead).",
+        missing.join(", ")
+    );
 }
 
 fn runtime_libraries(install: &Path) -> Vec<PathBuf> {
@@ -218,13 +262,19 @@ fn runtime_libraries(install: &Path) -> Vec<PathBuf> {
 #[cfg(feature = "generate-bindings")]
 const BOUND_FUNCTIONS: &[&str] = &[
     "ggml_backend_dev_count",
+    "ggml_backend_dev_description",
     "ggml_backend_dev_get",
     "ggml_backend_dev_type",
     "ggml_backend_load_all",
+    "ggml_backend_reg_by_name",
+    "ggml_backend_reg_get_proc_address",
+    "ggml_threadpool_params_default",
     "llama_backend_init",
+    "llama_attach_threadpool",
     "llama_batch_free",
     "llama_batch_init",
     "llama_context_default_params",
+    "llama_detach_threadpool",
     "llama_encode",
     "llama_free",
     "llama_get_embeddings_seq",
@@ -235,6 +285,7 @@ const BOUND_FUNCTIONS: &[&str] = &[
     "llama_model_get_vocab",
     "llama_model_load_from_file",
     "llama_model_n_embd_out",
+    "llama_set_n_threads",
     "llama_tokenize",
     "llama_vocab_eos",
 ];

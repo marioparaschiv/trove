@@ -73,7 +73,7 @@ fn an_edited_section_is_embedded_alone_and_found_after_the_debounce() {
     assert_eq!(
         events.until("index_finished"),
         [
-            json!({ "type": "index_started", "mode": "changed" }),
+            json!({ "type": "index_started", "mode": "changed", "profile": "background" }),
             json!({ "type": "index_progress", "embedded": 1, "total": 1 }),
             json!({
                 "type": "index_finished",
@@ -88,6 +88,10 @@ fn an_edited_section_is_embedded_alone_and_found_after_the_debounce() {
     assert_eq!(
         run(serve.data_dir.path(), &["index", "--full"]),
         format!("indexed {notes} notes (0 removed), embedded 0 chunks\n")
+    );
+    assert_eq!(
+        events.next(),
+        json!({ "type": "index_started", "mode": "full", "profile": "foreground" })
     );
     for body in [json!({ "mode": "everything" }), json!({ "full": true })] {
         let (status, error) = serve.call("POST", "/index", Some(&body));
@@ -112,7 +116,7 @@ fn a_renamed_note_is_found_at_its_new_path_without_embedding() {
     assert_eq!(
         events.until("index_finished"),
         [
-            json!({ "type": "index_started", "mode": "changed" }),
+            json!({ "type": "index_started", "mode": "changed", "profile": "background" }),
             json!({
                 "type": "index_finished",
                 "report": { "files": 1, "removed": 1, "embedded": 0, "problems": [] },

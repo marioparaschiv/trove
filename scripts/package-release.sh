@@ -24,7 +24,7 @@ require() {
   done
 }
 
-# ggml loads its CPU backends from the executable's folder.
+# ggml loads its CPU and Vulkan backends from the executable's folder.
 require_backends() {
   if [ $# -eq 0 ]; then
     echo "no ggml CPU backends in $build" >&2
@@ -35,7 +35,8 @@ require_backends() {
 case "$platform" in
   # `trove` and libllama find the other libraries through their `$ORIGIN` rpath.
   linux-x86_64)
-    require "$build/trove" "$build/libllama.so.0" "$build/libggml.so.0" "$build/libggml-base.so.0"
+    require "$build/trove" "$build/libllama.so.0" "$build/libggml.so.0" "$build/libggml-base.so.0" \
+      "$build/libggml-vulkan.so"
     require_backends "$build"/libggml-cpu-*.so
     files=("$build/trove" "$build"/libllama.so* "$build"/libggml*.so*)
     extension=tar.gz
@@ -47,18 +48,16 @@ case "$platform" in
     extension=tar.gz
     ;;
   windows-x86_64)
-    require "$build/trove.exe" "$build/llama.dll" "$build/ggml.dll" "$build/ggml-base.dll"
+    require "$build/trove.exe" "$build/llama.dll" "$build/ggml.dll" "$build/ggml-base.dll" "$build/ggml-vulkan.dll"
     require_backends "$build"/ggml-cpu-*.dll
     files=("$build/trove.exe" "$build"/llama.dll "$build"/ggml*.dll)
-    # The llama.cpp DLLs need the VC++ runtime and OpenMP, which a fresh Windows may not have.
+    # The llama.cpp DLLs need the VC++ runtime, which a fresh Windows may not have.
     vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
     runtime=()
-    for pattern in 'VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll' 'VC/Redist/MSVC/*/x64/Microsoft.VC*.OpenMP/*.dll'; do
-      while IFS= read -r dll; do
-        runtime+=("$(cygpath --unix "$dll")")
-      done < <("$vswhere" -latest -find "$pattern" | tr -d '\r')
-    done
-    for dll in msvcp140.dll vcruntime140.dll vcomp140.dll; do
+    while IFS= read -r dll; do
+      runtime+=("$(cygpath --unix "$dll")")
+    done < <("$vswhere" -latest -find 'VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll' | tr -d '\r')
+    for dll in msvcp140.dll vcruntime140.dll; do
       if ! printf '%s\n' "${runtime[@]}" | grep -qi "/$dll$"; then
         echo "$dll not found in the Visual Studio redistributables" >&2
         exit 1

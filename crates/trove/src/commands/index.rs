@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use trove_core::{
-    embedder::Embedder,
+    embedder::{Embedder, Profile},
     http::IndexRequest,
     index::Index,
     indexer::{self, IndexMode, IndexReport},
@@ -36,6 +36,7 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
             &Arc::new(Embedder::from_config(&ctx.data_dir, &ctx.config)),
             &ctx.config,
             mode,
+            Profile::Foreground,
             &mut |_| {},
         )?,
     };

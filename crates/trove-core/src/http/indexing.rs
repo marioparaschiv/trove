@@ -19,6 +19,7 @@ use super::{
     openapi::Rejected,
 };
 use crate::{
+    embedder::Profile,
     error::full_message,
     indexer::{self, IndexMode, IndexReport, IndexerError},
 };
@@ -81,10 +82,14 @@ impl Job {
     }
 
     /// Runs once no other run is running, reporting on the events stream, and failures also on stderr.
-    pub(super) async fn run(self, mode: IndexMode) -> Result<IndexReport, JobError> {
+    pub(super) async fn run(
+        self,
+        mode: IndexMode,
+        profile: Profile,
+    ) -> Result<IndexReport, JobError> {
         let state = Arc::clone(&self.state);
         let _turn = state.indexing.turn.lock().await;
-        state.publish(Event::IndexStarted { mode });
+        state.publish(Event::IndexStarted { mode, profile });
 
         let blocking_state = Arc::clone(&state);
         let result = tokio::task::spawn_blocking(move || {
@@ -94,6 +99,7 @@ impl Job {
                 &state.embedder,
                 &state.config,
                 mode,
+                profile,
                 &mut |progress| {
                     state.publish(Event::IndexProgress {
                         embedded: progress.embedded,
@@ -178,7 +184,7 @@ pub(super) async fn index(
 ) -> Result<Json<IndexReport>, ApiError> {
     let Json(IndexRequest { mode }) = request?;
     // On its own task, so a client that goes away doesn't cut the run short.
-    let report = tokio::spawn(Job::queue(&state).run(mode))
+    let report = tokio::spawn(Job::queue(&state).run(mode, Profile::Foreground))
         .await
         .map_err(|error| ApiError::internal(&error))?
         .map_err(|error| ApiError::internal(&error))?;

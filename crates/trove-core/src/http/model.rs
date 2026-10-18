@@ -9,11 +9,24 @@ use super::{
     error::{ApiError, ErrorBody},
     openapi::Rejected,
 };
+use crate::embedder::{Embedder, EmbedderError};
 
-/// Whether the embedding model is in memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// Whether the embedding model is in memory, and on what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ModelStatus {
     pub loaded: bool,
+    /// What the model runs on while loaded: the GPU as its driver names it, or `CPU`.
+    pub device: Option<String>,
+}
+
+impl ModelStatus {
+    pub(super) fn of(embedder: &Embedder) -> Self {
+        let loaded = embedder.is_loaded();
+        Self {
+            loaded,
+            device: embedder.device().filter(|_| loaded).map(str::to_owned),
+        }
+    }
 }
 
 /// Loads the model now, so the first search doesn't wait for it. Returns once it is loaded.
@@ -30,12 +43,15 @@ pub(super) async fn prewarm(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ModelStatus>, ApiError> {
     let embedder = Arc::clone(&state.embedder);
-    tokio::task::spawn_blocking(move || embedder.load())
-        .await
-        .map_err(|error| ApiError::internal(&error))?
-        .map_err(|error| ApiError::internal(&error))?;
+    let status = tokio::task::spawn_blocking(move || {
+        embedder.load()?;
+        Ok(ModelStatus::of(&embedder))
+    })
+    .await
+    .map_err(|error| ApiError::internal(&error))?
+    .map_err(|error: EmbedderError| ApiError::internal(&error))?;
 
-    Ok(Json(ModelStatus { loaded: true }))
+    Ok(Json(status))
 }
 
 /// Frees the model's memory now; the next search or index run loads it again.
@@ -57,5 +73,8 @@ pub(super) async fn unload(
         .await
         .map_err(|error| ApiError::internal(&error))?;
 
-    Ok(Json(ModelStatus { loaded: false }))
+    Ok(Json(ModelStatus {
+        loaded: false,
+        device: None,
+    }))
 }

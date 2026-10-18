@@ -2,12 +2,18 @@ use std::sync::Mutex;
 
 use super::{IndexerError, document_title};
 use crate::{
-    embedder::{Embedder, Input},
+    embedder::{Embedder, Input, Profile},
     index::{self, Index},
 };
 
-/// Chunk texts embedded per call. Small enough that a search waiting for the model isn't held up for long.
-const BATCH: usize = 16;
+/// Chunk texts embedded per call. Small enough that a search waiting for the model isn't held up for long, which in
+/// the background, on fewer threads, means fewer texts.
+fn batch(profile: Profile) -> usize {
+    match profile {
+        Profile::Foreground => 16,
+        Profile::Background => 4,
+    }
+}
 
 /// How far an index run is through embedding, reported after each batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,12 +27,13 @@ pub struct EmbedProgress {
 pub(super) fn embed_missing(
     index: &Mutex<Index>,
     embedder: &Embedder,
+    profile: Profile,
     progress: &mut dyn FnMut(EmbedProgress),
 ) -> Result<u64, IndexerError> {
     let total = index::lock(index).unembedded_count()?;
     let mut embedded = 0;
     loop {
-        let chunks = index::lock(index).unembedded_chunks(BATCH)?;
+        let chunks = index::lock(index).unembedded_chunks(batch(profile))?;
         if chunks.is_empty() {
             return Ok(embedded);
         }
@@ -43,7 +50,7 @@ pub(super) fn embed_missing(
                 text: &chunk.text,
             })
             .collect();
-        let vectors = embedder.embed(&inputs)?;
+        let vectors = embedder.embed(&inputs, profile)?;
 
         index::lock(index).insert_vectors(
             chunks
