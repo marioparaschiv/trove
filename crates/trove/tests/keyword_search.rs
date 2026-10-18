@@ -2,8 +2,11 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{data_dir_with_model, indexed, path_str, result_paths, run, search, vault_copy};
-use serde_json::{Value, json};
+use common::{
+    data_dir_with_model, indexed, path_str, result_paths, run, search, search_with_switches,
+    vault_copy,
+};
+use serde_json::json;
 use tempfile::TempDir;
 
 /// A vault of a few short notes, each on its own topic.
@@ -18,10 +21,7 @@ fn vault(notes: &[(&str, &str)]) -> TempDir {
 
 /// The notes keyword search alone finds for `query`, best first.
 fn word_matches(data_dir: &Path, query: &str) -> Vec<String> {
-    let response: Value =
-        serde_json::from_str(&run(data_dir, &["search", "--json", "--no-meaning", query])).unwrap();
-
-    result_paths(&response)
+    result_paths(&search_with_switches(data_dir, query, &["--no-meaning"]))
         .into_iter()
         .map(str::to_owned)
         .collect()
@@ -165,11 +165,7 @@ fn a_lookup_ranks_its_exact_match_above_a_stronger_meaning_match() {
     .unwrap();
     let data_dir = indexed(vault.path());
 
-    let meaning: Value = serde_json::from_str(&run(
-        data_dir.path(),
-        &["search", "--json", "--no-words", "7Q4K-29XP"],
-    ))
-    .unwrap();
+    let meaning = search_with_switches(data_dir.path(), "7Q4K-29XP", &["--no-words"]);
     assert_eq!(result_paths(&meaning), ["Kitchen scale.md"], "{meaning}");
 
     let response = search(data_dir.path(), "7Q4K-29XP");
@@ -204,17 +200,11 @@ fn a_note_with_a_rare_query_word_ranks_above_one_with_more_common_ones_and_no_no
     let data_dir = indexed(vault.path());
 
     // Sumac.md has two of the four words, Weeknight.md and Pasta.md three, but "sumac" is in no other note.
-    let response: Value = serde_json::from_str(&run(
+    let response = search_with_switches(
         data_dir.path(),
-        &[
-            "search",
-            "--json",
-            "--no-meaning",
-            "--no-graph",
-            "quick dinner recipe with sumac",
-        ],
-    ))
-    .unwrap();
+        "quick dinner recipe with sumac",
+        &["--no-meaning", "--no-graph"],
+    );
     let matches = result_paths(&response);
     assert_eq!(matches[0], "Sumac.md");
     // The notes with at least half the words, rare or not.

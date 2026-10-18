@@ -2,7 +2,10 @@ mod common;
 
 use std::{fs, path::Path};
 
-use common::{Serve, data_dir_with_model, indexed, path_str, result_paths, run, trove, vault_copy};
+use common::{
+    PARAPHRASE, PARAPHRASE_NOTE, Serve, data_dir_with_model, indexed, path_str, result_paths, run,
+    search, search_with_switches, trove, vault_copy,
+};
 use serde_json::{Value, json};
 
 const QUERIES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/queries.json");
@@ -11,28 +14,17 @@ const QUERIES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/queri
 const IDENTIFIER: &str = "7Q4K-29XP";
 const IDENTIFIER_NOTE: &str = "Home/Boiler service.md";
 
-/// Shares no word with its note, so only meaning finds it.
-const PARAPHRASE: &str = "how to look after my bread culture";
-const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
-
-fn search(data_dir: &Path, query: &str, switches: &[&str]) -> Value {
-    let mut args = vec!["search", "--json", query];
-    args.extend(switches);
-
-    serde_json::from_str(&run(data_dir, &args)).unwrap()
-}
-
 #[test]
 fn words_find_an_exact_identifier_that_meaning_misses() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
 
-    let response = search(data_dir.path(), IDENTIFIER, &[]);
+    let response = search(data_dir.path(), IDENTIFIER);
     assert_eq!(result_paths(&response), [IDENTIFIER_NOTE], "{response}");
     assert_eq!(response["results"][0]["why"], json!(["words"]));
 
     assert_eq!(
-        search(data_dir.path(), IDENTIFIER, &["--no-words"]),
+        search_with_switches(data_dir.path(), IDENTIFIER, &["--no-words"]),
         json!({ "results": [] })
     );
 }
@@ -42,12 +34,12 @@ fn meaning_finds_a_paraphrase_that_words_miss() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
 
-    let response = search(data_dir.path(), PARAPHRASE, &[]);
+    let response = search(data_dir.path(), PARAPHRASE);
     assert_eq!(result_paths(&response)[0], PARAPHRASE_NOTE, "{response}");
     assert_eq!(response["results"][0]["why"], json!(["meaning"]));
 
     assert_eq!(
-        search(data_dir.path(), PARAPHRASE, &["--no-meaning"]),
+        search_with_switches(data_dir.path(), PARAPHRASE, &["--no-meaning"]),
         json!({ "results": [] })
     );
     assert_eq!(
@@ -64,7 +56,7 @@ fn each_result_lists_the_stages_that_found_it() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
 
-    let response = search(data_dir.path(), "boiler", &[]);
+    let response = search(data_dir.path(), "boiler");
     assert_eq!(result_paths(&response), [IDENTIFIER_NOTE], "{response}");
     assert_eq!(response["results"][0]["why"], json!(["meaning", "words"]));
 
@@ -97,7 +89,7 @@ fn stage_switches_and_why_work_over_http() {
 
     // The CLI's switches go through the running service.
     assert_eq!(
-        search(serve.data_dir.path(), PARAPHRASE, &["--no-meaning"]),
+        search_with_switches(serve.data_dir.path(), PARAPHRASE, &["--no-meaning"]),
         json!({ "results": [] })
     );
 

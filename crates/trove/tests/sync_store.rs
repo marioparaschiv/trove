@@ -8,16 +8,13 @@ use std::{
 };
 
 use common::{
-    Serve, data_dir_with_model, indexed, path_str, remove_index, result_paths, run, search,
-    vault_copy,
+    HIDDEN_TOPIC, PARAPHRASE, PARAPHRASE_NOTE, Serve, data_dir_with_model, indexed, path_str,
+    remove_index, result_paths, run, search, vault_copy,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const STORE_FOLDER: &str = ".trove";
-const PARAPHRASE: &str = "how to look after my bread culture";
-const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
-const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
 /// Where a vector file holds its `vector_version`: after the 8-byte magic and the 4-byte format version.
 const VECTOR_VERSION_BYTES: Range<usize> = 12..76;
 /// Where the records start: after the magic, format version, `vector_version`, content hash, dims and chunk count.

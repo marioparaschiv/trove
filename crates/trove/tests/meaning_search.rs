@@ -3,8 +3,8 @@ mod common;
 use std::{collections::HashSet, fs, path::Path};
 
 use common::{
-    FIXTURE_VAULT, Serve, data_dir_with_model, indexed, path_str, percent_encode, result_paths,
-    run, search, trove, vault_copy,
+    FIXTURE_VAULT, HIDDEN_TOPIC, Serve, data_dir_with_model, indexed, path_str, percent_encode,
+    result_paths, run, search, search_with_switches, trove, vault_copy,
 };
 use serde_json::{Value, json};
 use trove_core::index::VECTOR_SCAN_FILE;
@@ -40,9 +40,6 @@ const PARAPHRASES: [Paraphrase; 4] = [
 ];
 
 const MATCHES_NOTHING: &str = "differential equations for orbital mechanics";
-
-/// Only notes in `.obsidian` and `.trash` are about this.
-const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
 
 fn words(text: &str) -> HashSet<String> {
     text.split(|char: char| !char.is_alphanumeric())
@@ -114,17 +111,11 @@ fn a_note_matching_in_several_sections_ranks_above_one_with_a_single_closer_para
     let data_dir = indexed(vault.path());
 
     // Long enough not to be expanded with its best chunk, which would pull it towards that one paragraph.
-    let response: Value = serde_json::from_str(&run(
+    let response = search_with_switches(
         data_dir.path(),
-        &[
-            "search",
-            "--json",
-            "--no-words",
-            "--no-graph",
-            "a kayak trip out on the sea with friends again",
-        ],
-    ))
-    .unwrap();
+        "a kayak trip out on the sea with friends again",
+        &["--no-words", "--no-graph"],
+    );
     assert_eq!(
         result_paths(&response),
         ["Kayak trips.md", "Weekend notes.md"],
@@ -197,11 +188,8 @@ fn a_missing_or_stale_vector_scan_file_is_written_again_by_the_next_search() {
     .unwrap();
     run(data_dir.path(), &["index"]);
     fs::write(&scan_file, &stale).unwrap();
-    let response: Value = serde_json::from_str(&run(
-        data_dir.path(),
-        &["search", "--json", "--no-words", "--no-graph", HIDDEN_TOPIC],
-    ))
-    .unwrap();
+    let response =
+        search_with_switches(data_dir.path(), HIDDEN_TOPIC, &["--no-words", "--no-graph"]);
     assert_eq!(result_paths(&response), ["Beekeeping.md"]);
     assert_ne!(fs::read(&scan_file).unwrap(), stale);
 }

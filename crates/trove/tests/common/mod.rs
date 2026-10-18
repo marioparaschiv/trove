@@ -42,6 +42,13 @@ pub const EVAL_QUERIES: &str = concat!(
 pub const RELATED_VAULT: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/related-vault");
 
+/// Shares no word with its note in the fixture vault, so only meaning finds it.
+pub const PARAPHRASE: &str = "how to look after my bread culture";
+pub const PARAPHRASE_NOTE: &str = "Cooking/Sourdough starter.md";
+
+/// Only the fixture vault's notes in `.obsidian` and `.trash` are about this.
+pub const HIDDEN_TOPIC: &str = "how to keep honeybee colonies healthy through winter";
+
 pub fn trove(data_dir: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_trove"));
     command.env("TROVE_DATA_DIR", data_dir);
@@ -161,7 +168,15 @@ pub fn path_str(path: &Path) -> &str {
 
 /// The JSON `trove search --json` prints.
 pub fn search(data_dir: &Path, query: &str) -> Value {
-    serde_json::from_str(&run(data_dir, &["search", "--json", query])).unwrap()
+    search_with_switches(data_dir, query, &[])
+}
+
+/// The JSON `trove search --json` prints with `switches`.
+pub fn search_with_switches(data_dir: &Path, query: &str, switches: &[&str]) -> Value {
+    let mut args = vec!["search", "--json", query];
+    args.extend(switches);
+
+    serde_json::from_str(&run(data_dir, &args)).unwrap()
 }
 
 /// The paths of the notes in a search response, best first.
