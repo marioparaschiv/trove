@@ -219,7 +219,7 @@ impl Stage for Words<'_> {
 
             candidates.push(Candidate {
                 chunk_id,
-                score: coverage[&file_id].share,
+                score: 0.0,
                 why: BTreeSet::from([Signal::Words]),
                 coverage: Some(coverage[&file_id]),
             });

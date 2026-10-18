@@ -72,7 +72,6 @@ pub enum VectorScanError {
 /// row's vector as `i8`s, then each row's scale as an `f32`, then each row's chunk id as an `i64`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Header {
-    precision: u32,
     dims: u32,
     rows: u64,
     /// The model identity the vectors were made under; empty before the first index run.
@@ -85,7 +84,7 @@ impl Header {
         let mut bytes = [0; HEADER_LEN];
         bytes[0..8].copy_from_slice(MAGIC);
         bytes[8..12].copy_from_slice(&FORMAT.to_le_bytes());
-        bytes[12..16].copy_from_slice(&self.precision.to_le_bytes());
+        bytes[12..16].copy_from_slice(&INT8.to_le_bytes());
         bytes[16..20].copy_from_slice(&self.dims.to_le_bytes());
         bytes[24..32].copy_from_slice(&self.rows.to_le_bytes());
         bytes[32..32 + self.vector_version.len()].copy_from_slice(self.vector_version.as_bytes());
@@ -104,7 +103,6 @@ impl Header {
 
         let vector_version = &bytes[32..32 + VECTOR_VERSION_LEN];
         let header = Self {
-            precision: INT8,
             dims: u32_at(16),
             rows: u64::from_le_bytes(bytes[24..32].try_into().unwrap()),
             vector_version: String::from_utf8(
@@ -229,7 +227,6 @@ impl VectorScan {
         }
 
         let header = Header {
-            precision: INT8,
             dims: (vector_len.unwrap_or(0) / size_of::<f16>()) as u32,
             rows: ids.len() as u64,
             vector_version: vector_version.to_owned(),
@@ -440,19 +437,17 @@ mod tests {
         let path = data_dir.path().join(VECTOR_SCAN_FILE);
         let written = fs::read(&path).unwrap();
         let header = Header::parse(&written).unwrap();
-        let stale_headers = [
-            Header {
-                precision: INT8 + 1,
-                ..header.clone()
-            },
-            Header {
+        let mut other_precision = written.clone();
+        other_precision[12..16].copy_from_slice(&(INT8 + 1).to_le_bytes());
+        let mut other_dims = written.clone();
+        other_dims[..HEADER_LEN].copy_from_slice(
+            &Header {
                 dims: header.dims / 2,
                 ..header
-            },
-        ];
-        for stale in stale_headers {
-            let mut file = written.clone();
-            file[..HEADER_LEN].copy_from_slice(&stale.to_bytes());
+            }
+            .to_bytes(),
+        );
+        for file in [other_precision, other_dims] {
             fs::write(&path, &file).unwrap();
 
             let mut index = Index::open(&data_dir).unwrap();

@@ -64,7 +64,8 @@ pub struct Candidate {
     pub score: f32,
     /// The stages that found this chunk.
     pub why: BTreeSet<Signal>,
-    /// How much of the query the chunk's note has, for a chunk found by words.
+    /// How much of the query the chunk's note has, for a chunk found by words. `Some` marks a word match, whose score
+    /// is unused: scoring reads the coverage.
     pub coverage: Option<Coverage>,
 }
 
