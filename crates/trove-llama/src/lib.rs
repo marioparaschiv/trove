@@ -445,7 +445,7 @@ fn normalised(vector: &[f32]) -> Vec<f32> {
     vector.iter().map(|&value| value * scale).collect()
 }
 
-/// Whether llama.cpp found a GPU, which `Devices::Default` then runs models on.
+/// Whether llama.cpp found a discrete GPU, which `Devices::Default` then runs models on.
 pub fn has_gpu() -> Result<bool, LlamaError> {
     init_backend()?;
     Ok(first_gpu().is_some())
