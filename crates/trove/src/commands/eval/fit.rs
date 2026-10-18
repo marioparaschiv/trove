@@ -203,8 +203,8 @@ fn example(features: QueryFeatures, note: &str) -> Option<Example> {
 }
 
 /// The [`LINEAR`] weights by pairwise logistic regression (RankNet's loss): for each example, the answer should score
-/// above each other note, each example counting alike however many notes it has. Newton's method from the compiled weights,
-/// so the same examples give the same weights. Scaled so meaning weighs 1, as only ratios rank.
+/// above each other note, each example counting alike however many notes it has. Newton's method from the compiled
+/// weights, so the same examples give the same weights. Scaled so meaning weighs 1, as only ratios rank.
 fn fit(examples: &[Example], next_chunk_share: f32) -> anyhow::Result<Weights> {
     const N: usize = LINEAR.len();
     let pairs: Vec<(f64, Vec<[f64; N]>)> = examples

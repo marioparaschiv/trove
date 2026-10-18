@@ -21,9 +21,9 @@ const TOP_CHUNKS: usize = 3;
 
 /// Scores notes as DigUp does, from the meaning and word candidates before it. A note matches when its best chunk's
 /// meaning stands out ([`MIN_Z`]) or it has at least [`MIN_COVERAGE`] of the query's words, all words alike, and
-/// scores by its [`Signals`] ([`Weights::score`]). Adds one candidate per matching note, best first: its best chunk by meaning
-/// when that stands out, else its best word match. It lists meaning when meaning stood out and words when the note has
-/// any of the words.
+/// scores by its [`Signals`] ([`Weights::score`]). Adds one candidate per matching note, best first: its best chunk by
+/// meaning when that stands out, else its best word match. It lists meaning when meaning stood out and words when the
+/// note has any of the words.
 pub struct Scoring<'a> {
     index: &'a Mutex<Index>,
     weights: Weights,
