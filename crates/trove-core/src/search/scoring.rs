@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeSet, HashMap},
+    iter,
     sync::Mutex,
 };
 
@@ -23,11 +24,17 @@ const WORD_WEIGHT: f32 = 2.0;
 /// matches.
 const LOOKUP_MEANING_WEIGHT: f32 = 0.5;
 const LOOKUP_WORD_WEIGHT: f32 = 2.0 * WORD_WEIGHT;
+/// How much a note's second best chunk by meaning adds to its best when it stands out too, so a note that matches in
+/// several sections beats one lucky paragraph. Each chunk after it adds half as much as the one before, up to
+/// [`TOP_CHUNKS`]. Counting chunks that don't stand out loses on the eval: a long note gathers many middling ones.
+const NEXT_CHUNK_SHARE: f32 = 0.1;
+const TOP_CHUNKS: usize = 3;
 
 /// Scores notes as DigUp does, from the meaning and word candidates before it. A note matches when its best chunk's
 /// meaning stands out ([`MIN_Z`]) or it has at least [`MIN_COVERAGE`] of the query's words, all words alike, and
-/// scores `meaning weight × z + word weight × coverage ^ COVERAGE_POWER`, z being 0 for a note meaning didn't add (it
-/// adds only chunks above the query's average), and coverage weighing rare words more ([`Coverage::weighted`]). Adds
+/// scores `meaning weight × z + word weight × coverage ^ COVERAGE_POWER`, z being its best chunks' z-scores
+/// ([`meaning_score`]; meaning adds only chunks above the query's average), and coverage weighing rare words more
+/// ([`Coverage::weighted`]). Adds
 /// one candidate per matching note, best first: its best chunk by meaning when that stands out, else its best word
 /// match. It lists meaning when meaning stood out and words when the note has any of the words.
 pub struct Scoring<'a> {
@@ -40,11 +47,31 @@ impl<'a> Scoring<'a> {
     }
 }
 
+/// A note's meaning score from its chunks' z-scores: its best, plus a decaying share ([`NEXT_CHUNK_SHARE`]) of each
+/// next best that stands out too ([`MIN_Z`]), up to [`TOP_CHUNKS`]. 0 for a note meaning didn't add.
+fn meaning_score(scores: &mut [f32]) -> f32 {
+    scores.sort_by(|a, b| b.total_cmp(a));
+    let Some((&best, next)) = scores.split_first() else {
+        return 0.0;
+    };
+
+    let shares = iter::successors(Some(NEXT_CHUNK_SHARE), |share| Some(share / 2.0));
+    best + next
+        .iter()
+        .take(TOP_CHUNKS - 1)
+        .take_while(|&&z| z >= MIN_Z)
+        .zip(shares)
+        .map(|(z, share)| share * z)
+        .sum::<f32>()
+}
+
 /// What the stages before found in one note.
 #[derive(Default)]
 struct Note {
     /// The best chunk by meaning, and its z-score.
     meaning: Option<(i64, f32)>,
+    /// The z-scores of the chunks meaning added.
+    meaning_scores: Vec<f32>,
     /// The best chunk by words, and the note's coverage.
     words: Option<(i64, Coverage)>,
 }
@@ -67,8 +94,11 @@ impl Stage for Scoring<'_> {
                 if note.words.is_none() {
                     note.words = Some((candidate.chunk_id, coverage));
                 }
-            } else if note.meaning.is_none_or(|(_, z)| candidate.score > z) {
-                note.meaning = Some((candidate.chunk_id, candidate.score));
+            } else {
+                if note.meaning.is_none_or(|(_, z)| candidate.score > z) {
+                    note.meaning = Some((candidate.chunk_id, candidate.score));
+                }
+                note.meaning_scores.push(candidate.score);
             }
         }
 
@@ -80,7 +110,7 @@ impl Stage for Scoring<'_> {
 
         let mut scored: Vec<(i64, Candidate)> = notes
             .into_iter()
-            .filter_map(|(file_id, note)| {
+            .filter_map(|(file_id, mut note)| {
                 let z = note.meaning.map_or(0.0, |(_, z)| z);
                 let coverage = note.words.map(|(_, coverage)| coverage).unwrap_or_default();
                 let stands_out = z >= MIN_Z;
@@ -106,7 +136,7 @@ impl Stage for Scoring<'_> {
                     file_id,
                     Candidate {
                         chunk_id,
-                        score: meaning_weight * z
+                        score: meaning_weight * meaning_score(&mut note.meaning_scores)
                             + word_weight * coverage.weighted.powf(COVERAGE_POWER),
                         why,
                         coverage: None,

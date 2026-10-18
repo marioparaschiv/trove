@@ -92,6 +92,40 @@ fn a_paraphrase_sharing_no_words_finds_its_note_first_at_the_heading() {
 }
 
 #[test]
+fn a_note_matching_in_several_sections_ranks_above_one_with_a_single_closer_paragraph() {
+    let vault = vault_copy();
+    fs::write(
+        vault.path().join("Kayak trips.md"),
+        "# Kayak trips\n\n## Paddling\n\nOn a sea kayak day trip I keep a low, relaxed paddle stroke and rotate from \
+         the torso, so a long crossing does not tire my arms.\n\n## Packing the kayak\n\nFor a sea kayak day trip, \
+         heavy gear goes low in the kayak hatches, water and food behind the seat.\n\n## Rescues\n\nBefore any sea \
+         kayak trip we practise the assisted rescue: drain the swamped kayak across my deck, then hold it while the \
+         paddler climbs back in.\n",
+    )
+    .unwrap();
+    // Its Saturday matches the query better than any one section above.
+    fs::write(
+        vault.path().join("Weekend notes.md"),
+        "# Weekend notes\n\n## Saturday\n\nWent on a sea kayak trip: paddled along the coast to the sea caves and \
+         back, about twelve kilometres.\n\n## Shopping\n\nNeed batteries, dish soap, a new kettle descaler and \
+         stamps.\n\n## Car\n\nThe rear tyre is losing pressure again; book the garage for a puncture repair.\n",
+    )
+    .unwrap();
+    let data_dir = indexed(vault.path());
+
+    let response: Value = serde_json::from_str(&run(
+        data_dir.path(),
+        &["search", "--json", "--no-words", "--no-graph", "kayak trip"],
+    ))
+    .unwrap();
+    assert_eq!(
+        result_paths(&response),
+        ["Kayak trips.md", "Weekend notes.md"],
+        "{response}"
+    );
+}
+
+#[test]
 fn a_query_matching_nothing_finds_nothing() {
     let vault = vault_copy();
     let data_dir = indexed(vault.path());
