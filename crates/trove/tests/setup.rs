@@ -1,3 +1,5 @@
+mod common;
+
 use std::{
     fs,
     io::{BufRead, BufReader, Write},
@@ -188,10 +190,9 @@ impl Setup {
     }
 
     fn command(&self, endpoint: &str) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_trove"));
+        let mut command = common::trove(&self.data_dir);
         command
             .args(["setup", "--json"])
-            .env("TROVE_DATA_DIR", &self.data_dir)
             .env("HF_HUB_CACHE", &self.hf_cache)
             .env("HF_ENDPOINT", endpoint)
             .env_remove("HF_HOME");
@@ -226,14 +227,6 @@ fn kinds(events: &[Value]) -> Vec<&str> {
         .collect()
 }
 
-fn assert_success(output: &Output) {
-    assert!(
-        output.status.success(),
-        "setup failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 fn resolve_path() -> String {
     format!("/{REPO}/resolve/{REVISION}/{FILE}")
 }
@@ -256,7 +249,7 @@ fn downloads_the_model_and_reports_each_step() {
 
     let (output, events) = setup.run(&server.endpoint());
 
-    assert_success(&output);
+    common::stdout(&output);
     assert_eq!(kinds(&events), ["file", "verifying", "done"]);
     assert_eq!(events[0]["from"], "download");
     assert_eq!(events[0]["name"], FILE);
@@ -282,7 +275,7 @@ fn assert_resumes_after(first: Reply) -> Vec<Value> {
 
     let (output, events) = setup.run(&server.endpoint());
 
-    assert_success(&output);
+    common::stdout(&output);
     assert_eq!(kinds(&events), ["file", "retry", "verifying", "done"]);
     assert_eq!(fs::read(setup.model()).unwrap(), fixture());
 
@@ -334,7 +327,7 @@ fn a_matching_file_in_the_hugging_face_cache_is_copied_without_a_request() {
 
     let (output, events) = setup.run(&server.endpoint());
 
-    assert_success(&output);
+    common::stdout(&output);
     assert_eq!(kinds(&events), ["file", "done"]);
     assert_eq!(events[0]["from"], "cache");
     assert_eq!(fs::read(setup.model()).unwrap(), fixture());
@@ -388,12 +381,12 @@ fn running_setup_again_with_a_good_file_present_does_nothing() {
     let server = Server::start(vec![Reply::Full]);
     let setup = Setup::new();
     let (output, _) = setup.run(&server.endpoint());
-    assert_success(&output);
+    common::stdout(&output);
     let requests = server.requests();
 
     let (output, events) = setup.run(&server.endpoint());
 
-    assert_success(&output);
+    common::stdout(&output);
     assert_eq!(kinds(&events), ["done"]);
     assert_eq!(server.requests(), requests);
 }

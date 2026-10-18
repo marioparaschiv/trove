@@ -1,0 +1,9 @@
+{
+  "id": "trove",
+  "name": "Trove",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "Search your vault by meaning, through the local Trove service.",
+  "author": "Mario Paraschiv",
+  "isDesktopOnly": true
+}

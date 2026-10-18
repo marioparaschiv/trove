@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex, MutexGuard, mpsc},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -11,7 +11,7 @@ use trove_llama::{EmbeddingModel, LlamaError};
 
 pub use trove_llama::{Devices, LLAMA_CPP_TAG, has_gpu};
 
-use crate::indexer::Chunker;
+use crate::{config::Config, data_dir::DataDir, indexer::Chunker};
 
 /// Tokens per input; context, batch and micro-batch are raised together, up to 8192.
 pub const CONTEXT_TOKENS: u32 = 2048;
@@ -97,6 +97,11 @@ struct State {
 }
 
 impl Embedder {
+    /// The model `trove setup` installs in `data_dir`, unloaded after the configured idle time.
+    pub fn from_config(data_dir: &DataDir, config: &Config) -> Self {
+        Self::new(config.model.path_in(data_dir), config.model_idle_timeout)
+    }
+
     pub fn new(model_path: PathBuf, idle_timeout: Duration) -> Self {
         Self::on_devices(model_path, idle_timeout, Devices::Default)
     }
@@ -144,6 +149,20 @@ impl Embedder {
         Ok(vectors)
     }
 
+    /// The tokens `input` takes as a prompt, uncut: more than `CONTEXT_TOKENS` means `embed` would cut it. Loads the
+    /// model, which holds the vocabulary.
+    pub fn count_tokens(&self, input: Input<'_>) -> Result<usize, EmbedderError> {
+        let mut state = self.shared.loaded_state()?;
+        let model = state
+            .model
+            .as_ref()
+            .expect("loaded_state returns a loaded model");
+        let count = model.count_tokens(&input.prompt())?;
+        state.last_used = Instant::now();
+
+        Ok(count)
+    }
+
     pub fn unload(&self) {
         let mut state = self.shared.lock_state();
         if state.model.take().is_some() {
@@ -153,7 +172,13 @@ impl Embedder {
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.shared.lock_state().model.is_some()
+        match self.shared.state.try_lock() {
+            Ok(state) => state.model.is_some(),
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().model.is_some(),
+            // Held for a load or an embed batch, either of which ends with the model loaded; waiting would hold up
+            // `/status` for a whole batch.
+            Err(TryLockError::WouldBlock) => true,
+        }
     }
 
     /// Receives every later load and unload.
@@ -205,7 +230,7 @@ impl Shared {
             state = self
                 .state_changed
                 .wait_timeout(state, self.idle_timeout - idle)
-                .expect("embedder state lock poisoned")
+                .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }
     }
@@ -215,13 +240,14 @@ impl Shared {
             .retain(|listener| listener.send(event).is_ok());
     }
 
+    // A panic while embedding leaves the state whole: the model is either there or not.
     fn lock_state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().expect("embedder state lock poisoned")
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn lock_listeners(&self) -> MutexGuard<'_, Vec<mpsc::Sender<ModelEvent>>> {
         self.listeners
             .lock()
-            .expect("embedder listeners lock poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }

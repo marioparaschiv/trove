@@ -23,6 +23,7 @@ CREATE TABLE files (
 
 -- heading_path joins the headings with '\n', which a heading can never contain.
 -- span_start and span_end are byte offsets of the chunk text in the file.
+-- token_count is the length of the chunk's document prompt (title and text) in model tokens.
 -- text_hash is the SHA-256 of the chunk text and keys its vector.
 CREATE TABLE chunks (
     id INTEGER PRIMARY KEY,
@@ -74,12 +75,4 @@ CREATE TABLE communities (
     member INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
     centrality REAL NOT NULL,
     PRIMARY KEY (level, id, member)
-) STRICT;
-
-CREATE TABLE suggestions (
-    note_a INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
-    note_b INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
-    state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'dismissed')),
-    PRIMARY KEY (note_a, note_b),
-    CHECK (note_a < note_b)
 ) STRICT;

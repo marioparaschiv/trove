@@ -169,7 +169,23 @@ impl EmbeddingModel {
         Ok(vectors)
     }
 
+    /// How many tokens `text` takes, special tokens included, before any cut to the context.
+    pub fn count_tokens(&self, text: &str) -> Result<usize, LlamaError> {
+        Ok(self.all_tokens(0, text)?.len())
+    }
+
     fn tokenize(&self, index: usize, text: &str) -> Result<Vec<llama_token>, LlamaError> {
+        let mut tokens = self.all_tokens(index, text)?;
+        if tokens.len() > self.max_tokens {
+            tokens.truncate(self.max_tokens - 1);
+            // SAFETY: `vocab` belongs to the live model.
+            tokens.push(unsafe { llama_vocab_eos(self.vocab) });
+        }
+
+        Ok(tokens)
+    }
+
+    fn all_tokens(&self, index: usize, text: &str) -> Result<Vec<llama_token>, LlamaError> {
         let length = i32::try_from(text.len()).map_err(|_| LlamaError::InputTooLong(index))?;
         let mut tokens: Vec<llama_token> = vec![0; text.len() + 2];
         let mut count = self.tokenize_into(text, length, &mut tokens);
@@ -180,11 +196,6 @@ impl EmbeddingModel {
 
         let count = usize::try_from(count).map_err(|_| LlamaError::InputTooLong(index))?;
         tokens.truncate(count);
-        if tokens.len() > self.max_tokens {
-            tokens.truncate(self.max_tokens - 1);
-            // SAFETY: `vocab` belongs to the live model.
-            tokens.push(unsafe { llama_vocab_eos(self.vocab) });
-        }
 
         Ok(tokens)
     }
@@ -310,7 +321,8 @@ fn init_backend() -> Result<(), LlamaError> {
     }
 }
 
-/// llama.cpp logs a lot while loading; only warnings and errors are kept, on stderr.
+/// llama.cpp logs a lot while loading, and warns about quirks of the pinned model's vocabulary on every load; only
+/// errors are kept, on stderr.
 unsafe extern "C" fn log(level: ggml_log_level, text: *const c_char, _: *mut c_void) {
     // A continuation line belongs to the previous message and takes its level.
     // The enum's integer type differs between compilers, hence i64.
@@ -322,7 +334,7 @@ unsafe extern "C" fn log(level: ggml_log_level, text: *const c_char, _: *mut c_v
         i64::from(level)
     };
 
-    if level >= i64::from(GGML_LOG_LEVEL_WARN) && !text.is_null() {
+    if level >= i64::from(GGML_LOG_LEVEL_ERROR) && !text.is_null() {
         // SAFETY: llama.cpp passes a NUL-terminated message.
         eprint!("{}", unsafe { CStr::from_ptr(text) }.to_string_lossy());
     }

@@ -1,24 +1,59 @@
 mod chunker;
+mod embed;
+mod frontmatter;
+mod links;
+mod neighbours;
+mod scan;
+mod store;
+
+use std::sync::Arc;
 
 use rusqlite::Transaction;
+use thiserror::Error;
 
-use crate::index::{Index, IndexError};
+use crate::{
+    embedder::{Embedder, EmbedderError},
+    index::IndexError,
+    sync_store::StoredChunk,
+};
 
 pub use chunker::Chunker;
+pub(crate) use chunker::document_title;
+pub use embed::EmbedProgress;
+pub use links::LinkParser;
+pub use scan::{IndexMode, IndexProblem, IndexReport, index_sources};
+pub use store::import_vector_files;
+
+#[derive(Debug, Error)]
+pub enum IndexerError {
+    #[error(transparent)]
+    Index(#[from] IndexError),
+    #[error(transparent)]
+    Embedder(#[from] EmbedderError),
+}
+
+impl From<rusqlite::Error> for IndexerError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Index(error.into())
+    }
+}
 
 /// A note whose `files` row is already written, handed to each processor.
 pub struct NoteFile<'a> {
     pub id: i64,
     pub title: &'a str,
     pub text: &'a str,
+    /// The chunks the sync store holds for exactly this text, already checked against it. The chunker takes them
+    /// instead of splitting the note again, which needs the model.
+    pub stored_chunks: Option<&'a [StoredChunk]>,
 }
 
 /// One independent step of indexing a note. Each processor replaces the rows it owns for the note.
 pub trait FileProcessor: Send + Sync {
-    fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexError>;
+    fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexerError>;
 }
 
-/// Runs its processors in order over a note, in one transaction.
+/// Runs its processors in order over a note, inside the caller's transaction.
 pub struct Indexer {
     processors: Vec<Box<dyn FileProcessor>>,
 }
@@ -28,18 +63,16 @@ impl Indexer {
         Self { processors }
     }
 
-    pub fn process(&self, index: &mut Index, note: &NoteFile<'_>) -> Result<(), IndexError> {
-        let tx = index.transaction()?;
+    /// Every processor a note goes through.
+    pub fn standard(embedder: Arc<Embedder>) -> Self {
+        Self::new(vec![Box::new(Chunker::new(embedder)), Box::new(LinkParser)])
+    }
+
+    pub fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexerError> {
         for processor in &self.processors {
-            processor.process(&tx, note)?;
+            processor.process(tx, note)?;
         }
 
-        Ok(tx.commit()?)
-    }
-}
-
-impl Default for Indexer {
-    fn default() -> Self {
-        Self::new(vec![Box::new(Chunker)])
+        Ok(())
     }
 }

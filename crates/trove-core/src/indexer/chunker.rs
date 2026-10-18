@@ -1,17 +1,94 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use rusqlite::Transaction;
 use sha2::{Digest, Sha256};
 
-use super::{FileProcessor, NoteFile};
-use crate::index::IndexError;
+use super::{FileProcessor, IndexerError, NoteFile, frontmatter::Frontmatter};
+use crate::embedder::{CONTEXT_TOKENS, Embedder, Input};
 
-/// Splits a note into one chunk per heading section and writes `chunks` and `chunks_fts`.
-pub struct Chunker;
+const HEADING_SEPARATOR: &str = " > ";
+
+/// Splits a note into one chunk per heading section, and a section too long for the model's context into chunks of
+/// whole paragraphs, then writes `chunks` and `chunks_fts`. Counting tokens loads the model, so a
+/// note whose chunks the sync store holds takes them from there.
+pub struct Chunker {
+    embedder: Arc<Embedder>,
+}
 
 impl Chunker {
-    /// Part of `vector_version`: bump it whenever chunk texts or boundaries change.
+    /// Part of `vector_version`: bump it whenever chunk texts, boundaries or document titles change.
     pub const VERSION: u32 = 1;
+
+    pub fn new(embedder: Arc<Embedder>) -> Self {
+        Self { embedder }
+    }
+
+    /// Splits `section` at paragraph boundaries into pieces whose prompts fit the context, each with its token count.
+    /// A single paragraph longer than the context stays whole, and the embedder cuts it.
+    fn fit(
+        &self,
+        text: &str,
+        title: &str,
+        section: Range<usize>,
+    ) -> Result<Vec<(Range<usize>, usize)>, IndexerError> {
+        let count = |span: &Range<usize>| {
+            self.embedder.count_tokens(Input::Document {
+                title,
+                text: &text[span.clone()],
+            })
+        };
+
+        let whole = count(&section)?;
+        if whole <= CONTEXT_TOKENS as usize {
+            return Ok(vec![(section, whole)]);
+        }
+
+        let mut pieces = Vec::new();
+        let mut current: Option<(Range<usize>, usize)> = None;
+        for paragraph in paragraphs(text, section) {
+            if let Some((span, tokens)) = current.take() {
+                let joined = span.start..paragraph.end;
+                let joined_tokens = count(&joined)?;
+                if joined_tokens <= CONTEXT_TOKENS as usize {
+                    current = Some((joined, joined_tokens));
+                    continue;
+                }
+
+                pieces.push((span, tokens));
+            }
+
+            let tokens = count(&paragraph)?;
+            current = Some((paragraph, tokens));
+        }
+        pieces.extend(current);
+
+        Ok(pieces)
+    }
+
+    fn split(&self, note: &NoteFile<'_>) -> Result<Vec<Chunk>, IndexerError> {
+        let mut chunks = Vec::new();
+        for section in sections(note.text) {
+            let title = document_title(note.title, &section.heading_path);
+            for (span, token_count) in self.fit(note.text, &title, section.span)? {
+                chunks.push(Chunk {
+                    heading_path: section.heading_path.clone(),
+                    span,
+                    token_count: Some(token_count),
+                });
+            }
+        }
+
+        Ok(chunks)
+    }
+}
+
+/// The title in a chunk's document prompt: its heading path, or the note title for text before the first heading.
+pub(crate) fn document_title(note_title: &str, heading_path: &str) -> String {
+    if heading_path.is_empty() {
+        note_title.to_owned()
+    } else {
+        heading_path.replace('\n', HEADING_SEPARATOR)
+    }
 }
 
 struct Section {
@@ -20,38 +97,57 @@ struct Section {
 }
 
 impl FileProcessor for Chunker {
-    fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexError> {
+    fn process(&self, tx: &Transaction<'_>, note: &NoteFile<'_>) -> Result<(), IndexerError> {
         tx.execute("DELETE FROM chunks WHERE file_id = ?1", [note.id])?;
 
         let mut insert_chunk = tx.prepare(
-            "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, text_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, token_count, text_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
         let mut insert_fts = tx.prepare(
             "INSERT INTO chunks_fts (rowid, title, heading_path, text) VALUES (?1, ?2, ?3, ?4)",
         )?;
 
-        for (ordinal, section) in sections(note.text).into_iter().enumerate() {
-            let text = &note.text[section.span.clone()];
+        let chunks = match note.stored_chunks {
+            Some(stored) => stored
+                .iter()
+                .map(|chunk| Chunk {
+                    heading_path: chunk.heading_path.clone(),
+                    span: chunk.span.clone(),
+                    token_count: None,
+                })
+                .collect(),
+            None => self.split(note)?,
+        };
+
+        for (ordinal, chunk) in chunks.iter().enumerate() {
+            let text = &note.text[chunk.span.clone()];
             let text_hash = Sha256::digest(text.as_bytes());
 
             let chunk_id = insert_chunk.insert((
                 note.id,
                 ordinal,
-                &section.heading_path,
-                section.span.start,
-                section.span.end,
+                &chunk.heading_path,
+                chunk.span.start,
+                chunk.span.end,
+                chunk.token_count,
                 text_hash.as_slice(),
             ))?;
-            insert_fts.execute((chunk_id, note.title, &section.heading_path, text))?;
+            insert_fts.execute((chunk_id, note.title, &chunk.heading_path, text))?;
         }
 
         Ok(())
     }
 }
 
+struct Chunk {
+    heading_path: String,
+    span: Range<usize>,
+    token_count: Option<usize>,
+}
+
 fn sections(text: &str) -> Vec<Section> {
-    let body_start = frontmatter_end(text);
+    let body_start = Frontmatter::find(text).map_or(0, |frontmatter| frontmatter.end);
     let mut sections = Vec::new();
     let mut headings: Vec<(usize, &str)> = Vec::new();
     let mut fence: Option<Fence> = None;
@@ -62,13 +158,7 @@ fn sections(text: &str) -> Vec<Section> {
         let line_end = line_start + line.len();
         let content = line.trim_end();
 
-        if let Some(marker) = Fence::parse(content) {
-            fence = match fence {
-                None => Some(marker),
-                Some(open) if marker.closes(&open) => None,
-                open => open,
-            };
-        } else if fence.is_none()
+        if !Fence::track(&mut fence, content)
             && let Some((level, title)) = atx_heading(content)
         {
             push_section(&mut sections, text, &headings, section_start..line_start);
@@ -91,44 +181,49 @@ fn push_section(
     headings: &[(usize, &str)],
     span: Range<usize>,
 ) {
-    let raw = &text[span.clone()];
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    let Some(span) = trimmed(text, span) else {
         return;
-    }
+    };
 
-    let start = span.start + (raw.len() - raw.trim_start().len());
     let heading_path = headings
         .iter()
         .map(|(_, title)| *title)
         .collect::<Vec<_>>()
         .join("\n");
 
-    sections.push(Section {
-        heading_path,
-        span: start..start + trimmed.len(),
-    });
+    sections.push(Section { heading_path, span });
 }
 
-/// Byte offset where the body starts, after a leading `---` frontmatter block if there is one.
-fn frontmatter_end(text: &str) -> usize {
-    let mut lines = text.split_inclusive('\n');
-    let Some(first) = lines.next() else {
-        return 0;
-    };
-    if first.trim_end() != "---" {
-        return 0;
+/// `span` without surrounding whitespace, or `None` when it is all whitespace.
+fn trimmed(text: &str, span: Range<usize>) -> Option<Range<usize>> {
+    let raw = &text[span.clone()];
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
     }
 
-    let mut offset = first.len();
-    for line in lines {
-        offset += line.len();
-        if matches!(line.trim_end(), "---" | "...") {
-            return offset;
+    let start = span.start + (raw.len() - raw.trim_start().len());
+    Some(start..start + trimmed.len())
+}
+
+/// The spans of the runs of non-blank lines in `section`.
+fn paragraphs(text: &str, section: Range<usize>) -> Vec<Range<usize>> {
+    let mut paragraphs = Vec::new();
+    let mut paragraph_start = section.start;
+    let mut line_start = section.start;
+
+    for line in text[section.clone()].split_inclusive('\n') {
+        let line_end = line_start + line.len();
+        if line.trim().is_empty() {
+            paragraphs.extend(trimmed(text, paragraph_start..line_start));
+            paragraph_start = line_end;
         }
-    }
 
-    0
+        line_start = line_end;
+    }
+    paragraphs.extend(trimmed(text, paragraph_start..section.end));
+
+    paragraphs
 }
 
 /// An ATX heading (`## Title`) with at most three spaces of indent.
@@ -159,7 +254,7 @@ fn atx_heading(line: &str) -> Option<(usize, &str)> {
     Some((level, title))
 }
 
-struct Fence {
+pub(super) struct Fence {
     marker: u8,
     len: usize,
     has_info: bool,
@@ -190,6 +285,22 @@ impl Fence {
             len,
             has_info: !unindented[len..].trim().is_empty(),
         })
+    }
+
+    /// Follows fenced code from line to line: updates `open` for `line` and returns whether the line is a fence or
+    /// inside one.
+    pub(super) fn track(open: &mut Option<Fence>, line: &str) -> bool {
+        let Some(marker) = Self::parse(line) else {
+            return open.is_some();
+        };
+
+        *open = match open.take() {
+            None => Some(marker),
+            Some(current) if marker.closes(&current) => None,
+            current => current,
+        };
+
+        true
     }
 
     fn closes(&self, open: &Fence) -> bool {

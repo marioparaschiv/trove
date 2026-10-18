@@ -1,0 +1,50 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "trove",
+  "private": true,
+  "type": "module",
+  "title": "Trove",
+  "description": "Search your Obsidian vault by meaning and open results in Obsidian",
+  "icon": "extension-icon.png",
+  "author": "marioparaschiv",
+  "categories": [
+    "Productivity"
+  ],
+  "license": "MIT",
+  "platforms": [
+    "macOS",
+    "Windows"
+  ],
+  "commands": [
+    {
+      "name": "search-vault",
+      "title": "Search Vault",
+      "description": "Search your Obsidian vault by meaning",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "troveBinary",
+      "title": "Trove Binary",
+      "description": "The trove executable, started as `trove serve` when no service is running",
+      "type": "file",
+      "required": true
+    }
+  ],
+  "scripts": {
+    "typecheck": "bun run build",
+    "lint": "biome check .",
+    "test": "node --test src/*.test.ts",
+    "build": "ray build --environment dist --output dist --non-interactive"
+  },
+  "dependencies": {
+    "@raycast/api": "^2.8.0",
+    "@raycast/utils": "^2.3.2",
+    "@trove/client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.10",
+    "typescript": "^5.9.3"
+  }
+}

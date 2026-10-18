@@ -1,4 +1,6 @@
 mod commands;
+mod searcher;
+mod service;
 
 use clap::Parser;
 use trove_core::{config::Config, data_dir::DataDir};

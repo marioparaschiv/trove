@@ -1,9 +1,20 @@
-use std::path::PathBuf;
+mod sources;
+mod stats;
+mod vectors;
+
+use std::{
+    path::PathBuf,
+    sync::{Mutex, MutexGuard, PoisonError},
+};
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use thiserror::Error;
 
 use crate::data_dir::DataDir;
+
+pub use sources::{Source, SourceError};
+pub use stats::IndexStats;
+pub(crate) use vectors::SectionVector;
 
 pub const INDEX_FILE: &str = "index.sqlite";
 pub const SCHEMA_VERSION: u32 = 1;
@@ -86,12 +97,22 @@ impl Index {
         self.conn.transaction()
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     fn meta<T: rusqlite::types::FromSql>(&self, key: &str) -> rusqlite::Result<T> {
         self.conn
             .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
                 row.get(0)
             })
     }
+}
+
+/// Locks an index shared between threads.
+pub fn lock(index: &Mutex<Index>) -> MutexGuard<'_, Index> {
+    // A panic mid-query leaves the connection usable: SQLite rolls back the open transaction.
+    index.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn read_schema_version(conn: &Connection) -> rusqlite::Result<Option<u32>> {

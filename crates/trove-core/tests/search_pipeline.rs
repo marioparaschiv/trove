@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use trove_core::search::{Candidate, Pipeline, Query, SearchError, Stage};
 
 struct AppendChunk(i64);
@@ -11,6 +13,7 @@ impl Stage for AppendChunk {
         candidates.push(Candidate {
             chunk_id: self.0,
             score: 1.0,
+            why: BTreeSet::new(),
         });
 
         Ok(candidates)

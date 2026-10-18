@@ -20,8 +20,9 @@ use ureq::{
         },
     },
 };
+use utoipa::ToSchema;
 
-use crate::{config::Config, data_dir::DataDir};
+use crate::{config::Config, data_dir::DataDir, error::full_message};
 
 pub const MODEL_REPO: &str = "ggml-org/embeddinggemma-2-GGUF";
 pub const MODEL_REVISION: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
@@ -84,8 +85,9 @@ impl ModelFile {
 }
 
 /// Progress of `setup`, serialised as one JSON line each by `trove setup --json`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[schema(as = SetupEvent)]
 pub enum Event {
     File {
         name: String,
@@ -106,6 +108,7 @@ pub enum Event {
         seconds: f64,
     },
     Done {
+        #[schema(value_type = String)]
         path: PathBuf,
     },
     Error {
@@ -113,8 +116,9 @@ pub enum Event {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = SetupSource)]
 pub enum Source {
     Cache,
     Download,
@@ -180,7 +184,7 @@ pub fn setup(
     match &result {
         Ok(path) => emit(Event::Done { path: path.clone() }),
         Err(error) => emit(Event::Error {
-            message: describe(error),
+            message: full_message(error),
         }),
     }
 
@@ -194,6 +198,20 @@ fn install(
 ) -> Result<PathBuf, SetupError> {
     let model = &config.model;
     let path = model.path_in(data_dir);
+    let folder = data_dir.path().join(MODELS_FOLDER);
+    fs::create_dir_all(&folder).map_err(|source| io_error("create", &folder, source))?;
+
+    // Two setups at once would both append to the partial file, so the second waits and then finds the model.
+    let lock_path = folder.join(format!("{}.lock", model.file));
+    let lock = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| io_error("open", &lock_path, source))?;
+    lock.lock()
+        .map_err(|source| io_error("lock", &lock_path, source))?;
+
     if path
         .try_exists()
         .map_err(|source| io_error("check", &path, source))?
@@ -201,8 +219,6 @@ fn install(
         return Ok(path);
     }
 
-    let folder = data_dir.path().join(MODELS_FOLDER);
-    fs::create_dir_all(&folder).map_err(|source| io_error("create", &folder, source))?;
     let partial = folder.join(format!("{}.partial", model.file));
 
     if let Some(cached) = hf_cache_copy(model)? {
@@ -344,7 +360,7 @@ fn download(
 
                 let delay = backoff(retry_delay, failures);
                 emit(Event::Retry {
-                    message: describe(&error),
+                    message: full_message(&error),
                     seconds: delay.as_secs_f64(),
                 });
                 thread::sleep(delay);
@@ -647,17 +663,4 @@ fn io_error(action: &'static str, path: &Path, source: io::Error) -> SetupError 
         path: path.to_path_buf(),
         source,
     }
-}
-
-fn describe(error: &dyn std::error::Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-
-    while let Some(error) = source {
-        message.push_str(": ");
-        message.push_str(&error.to_string());
-        source = error.source();
-    }
-
-    message
 }
