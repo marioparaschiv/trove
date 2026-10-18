@@ -61,6 +61,63 @@ fn hindi_words_with_vowel_signs_match_a_query_typed_without_their_ending() {
 }
 
 #[test]
+fn a_word_with_one_letter_wrong_finds_the_note_with_the_word() {
+    let vault = vault(&[
+        (
+            "Cluster.md",
+            "# Cluster\n\nUpgraded the kubernetes cluster to the new release on Friday.\n",
+        ),
+        (
+            "Garden.md",
+            "# Garden\n\nTomatoes need sun, water and a stake to climb.\n",
+        ),
+    ]);
+    let data_dir = indexed(vault.path());
+
+    assert_eq!(word_matches(data_dir.path(), "kubernetis"), ["Cluster.md"]);
+    assert_eq!(word_matches(data_dir.path(), "tomatoas"), ["Garden.md"]);
+    assert_eq!(
+        word_matches(data_dir.path(), "kubernetis upgrade"),
+        ["Cluster.md"]
+    );
+}
+
+#[test]
+fn a_word_typed_as_in_a_note_matches_only_that_word_not_words_like_it() {
+    let vault = vault(&[
+        ("Cat.md", "# Cat\n\nThe cat sleeps on the windowsill.\n"),
+        (
+            "Cart.md",
+            "# Cart\n\nThe shopping cart has a squeaky wheel.\n",
+        ),
+    ]);
+    let data_dir = indexed(vault.path());
+
+    assert_eq!(word_matches(data_dir.path(), "cat"), ["Cat.md"]);
+}
+
+#[test]
+fn a_chinese_or_japanese_word_inside_a_longer_run_of_text_finds_its_note() {
+    let vault = vault(&[
+        ("Shopping.md", "# 购物\n\n我昨天在超市买了咖啡豆和牛奶。\n"),
+        (
+            "Trip.md",
+            "# 旅行\n\n東京タワーに行きました。夜景がきれいでした。\n",
+        ),
+        (
+            "Garden.md",
+            "# Garden\n\nTomatoes need sun, water and a stake to climb.\n",
+        ),
+    ]);
+    let data_dir = indexed(vault.path());
+
+    assert_eq!(word_matches(data_dir.path(), "咖啡豆"), ["Shopping.md"]);
+    assert_eq!(word_matches(data_dir.path(), "牛奶"), ["Shopping.md"]);
+    assert_eq!(word_matches(data_dir.path(), "タワー"), ["Trip.md"]);
+    assert_eq!(word_matches(data_dir.path(), "夜景"), ["Trip.md"]);
+}
+
+#[test]
 fn a_chunk_of_digits_gets_no_vector_and_is_found_by_its_words() {
     let vault = vault(&[(
         "Meter readings.md",

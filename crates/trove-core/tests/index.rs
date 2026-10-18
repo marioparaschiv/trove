@@ -28,6 +28,7 @@ fn opening_an_empty_data_folder_creates_the_schema_and_reopening_keeps_it() {
 const VERSION_1: &str = "
     DROP TRIGGER chunks_fts_delete;
     DROP TABLE chunks_fts;
+    DROP TABLE chunks_trigram;
     CREATE VIRTUAL TABLE chunks_fts USING fts5 (title, heading_path, text, tokenize = 'porter unicode61');
     CREATE TRIGGER chunks_fts_delete AFTER DELETE ON chunks BEGIN
         DELETE FROM chunks_fts WHERE rowid = old.id;

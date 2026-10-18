@@ -152,7 +152,7 @@ fn eval_counts_a_no_answer_query_as_a_hit_when_nothing_is_found() {
     fs::write(
         &queries,
         json!([
-            { "query": "zeppelin hangar", "kind": "no_answer", "lang": "en", "note": null },
+            { "query": "zeppelin airship", "kind": "no_answer", "lang": "en", "note": null },
             { "query": "tomato", "kind": "no_answer", "lang": "en", "note": null },
             { "query": IDENTIFIER, "kind": "lookup", "lang": "en", "note": IDENTIFIER_NOTE },
         ])

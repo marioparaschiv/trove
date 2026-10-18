@@ -107,7 +107,6 @@ impl FileProcessor for Chunker {
             "INSERT INTO chunks (file_id, ordinal, heading_path, span_start, span_end, token_count, text_hash, has_words)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
-        let mut insert_fts = tx.prepare(keyword_text::INSERT)?;
 
         let chunks = match note.stored_chunks {
             Some(stored) => stored
@@ -135,13 +134,7 @@ impl FileProcessor for Chunker {
                 text_hash.as_slice(),
                 keyword_text::has_words(text),
             ))?;
-            keyword_text::insert(
-                &mut insert_fts,
-                chunk_id,
-                note.title,
-                &chunk.heading_path,
-                text,
-            )?;
+            keyword_text::insert(tx, chunk_id, note.title, &chunk.heading_path, text)?;
         }
 
         Ok(())

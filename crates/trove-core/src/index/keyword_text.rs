@@ -1,7 +1,7 @@
 //! Text the way keyword search keeps it and matches it, so that a word is found however it was typed: indexed text and
 //! queries go through the same [`normalized`]. Ported from DigUp's `SearchText` (see THIRD_PARTY_NOTICES.md).
 
-use rusqlite::Statement;
+use rusqlite::Connection;
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 /// Whether `c` is part of a word, as the tokenizer splits text: letters, digits and marks, so that a vowel sign or a
@@ -51,27 +51,27 @@ pub(crate) fn has_words(text: &str) -> bool {
     letters > 0 && letters * 4 >= others
 }
 
-/// Adds a chunk to keyword search, for [`insert`].
-pub(crate) const INSERT: &str = "INSERT INTO chunks_fts (rowid, title, heading_path, text, original) VALUES (?1, ?2, ?3, ?4, ?5)";
-
-/// Adds a chunk to keyword search through `statement`, prepared from [`INSERT`]: its title, heading path and text
-/// normalised, and the text as written when normalising changed it.
+/// Adds a chunk to keyword search, both the word and the trigram table: its title, heading path and text normalised,
+/// and the text as written when normalising changed it.
 pub(crate) fn insert(
-    statement: &mut Statement<'_>,
+    conn: &Connection,
     chunk_id: i64,
     title: &str,
     heading_path: &str,
     text: &str,
 ) -> rusqlite::Result<()> {
+    let title = normalized(title);
+    let heading_path = normalized(heading_path);
     let normalized_text = normalized(text);
     let original = (normalized_text != text).then_some(text);
-    statement.execute((
-        chunk_id,
-        normalized(title),
-        normalized(heading_path),
-        &normalized_text,
-        original,
-    ))?;
+    conn.prepare_cached(
+        "INSERT INTO chunks_fts (rowid, title, heading_path, text, original) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?
+    .execute((chunk_id, &title, &heading_path, &normalized_text, original))?;
+    conn.prepare_cached(
+        "INSERT INTO chunks_trigram (rowid, title, heading_path, text) VALUES (?1, ?2, ?3, ?4)",
+    )?
+    .execute((chunk_id, &title, &heading_path, &normalized_text))?;
 
     Ok(())
 }
