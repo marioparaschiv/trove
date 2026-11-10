@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./assets/logo.svg" width="120" alt="Trove logo" />
+
 <h1>Trove</h1>
 
 <b>Local semantic search for your notes.</b>
@@ -8,11 +10,11 @@ Search an Obsidian vault by meaning, see related notes and get link suggestions.
 
 <br />
 
-[![Release](https://img.shields.io/github/v/release/marioparaschiv/trove?style=for-the-badge&labelColor=0c0c0c&color=c9a227)](https://github.com/marioparaschiv/trove/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/marioparaschiv/trove/ci.yml?branch=main&style=for-the-badge&label=ci&labelColor=0c0c0c&color=c9a227)](https://github.com/marioparaschiv/trove/actions/workflows/ci.yml)
-[![Rust](https://img.shields.io/badge/rust-1.97-c9a227?style=for-the-badge&labelColor=0c0c0c)](https://www.rust-lang.org)
-[![llama.cpp](https://img.shields.io/badge/llama.cpp-b11461-c9a227?style=for-the-badge&labelColor=0c0c0c)](https://github.com/ggml-org/llama.cpp)
-[![License](https://img.shields.io/badge/license-MIT-c9a227?style=for-the-badge&labelColor=0c0c0c)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/marioparaschiv/trove?style=for-the-badge&labelColor=0c0c0c&color=c0c0c5)](https://github.com/marioparaschiv/trove/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/marioparaschiv/trove/ci.yml?branch=main&style=for-the-badge&label=ci&labelColor=0c0c0c&color=c0c0c5)](https://github.com/marioparaschiv/trove/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rust-1.97-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](https://www.rust-lang.org)
+[![llama.cpp](https://img.shields.io/badge/llama.cpp-b11461-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](https://github.com/ggml-org/llama.cpp)
+[![License](https://img.shields.io/badge/license-MIT-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](./LICENSE)
 
 [Install](#installation) · [Usage](#usage) · [Architecture](#architecture)
 
@@ -157,13 +159,13 @@ flowchart TB
     Index <-->|Vector files| Vault
 
     classDef client fill:#2b2b2b,stroke:#6b6b6b,color:#ffffff
-    classDef core fill:#c9a227,stroke:#c9a227,color:#0c0c0c
-    classDef data fill:#3b3b3b,stroke:#c9a227,color:#ffffff
+    classDef core fill:#e3e3e5,stroke:#e3e3e5,color:#151515
+    classDef data fill:#3b3b3b,stroke:#bbbbc0,color:#ffffff
     class Obsidian,Raycast,CLI client
     class API,Watcher,Search,Graph,Embedder core
     class Index,Vault data
     style Clients fill:transparent,stroke:#6b6b6b,stroke-width:2px
-    style Service fill:transparent,stroke:#c9a227,stroke-width:2px
+    style Service fill:transparent,stroke:#bbbbc0,stroke-width:2px
 ```
 
 - **Chunking.** One chunk per heading section. A long section splits at paragraph boundaries to fit a 2048-token context. Identical texts embed once.
