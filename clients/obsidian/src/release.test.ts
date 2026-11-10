@@ -18,7 +18,7 @@ import {
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..");
 const PIN = {
   version: "0.1.0",
-  repository: "marioparaschiv/trove-rust",
+  repository: "marioparaschiv/trove",
   assets: {
     "linux-x86_64": {
       file: "trove-0.1.0-linux-x86_64.tar.gz",
@@ -69,7 +69,7 @@ test("maps Node's platform names to release platforms", () => {
 test("downloads from the tagged GitHub release", () => {
   assert.equal(
     assetUrl(PIN, PIN.assets["linux-x86_64"]),
-    "https://github.com/marioparaschiv/trove-rust/releases/download/v0.1.0/trove-0.1.0-linux-x86_64.tar.gz",
+    "https://github.com/marioparaschiv/trove/releases/download/v0.1.0/trove-0.1.0-linux-x86_64.tar.gz",
   );
 });
 
