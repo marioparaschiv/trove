@@ -10,8 +10,6 @@ Search an Obsidian vault by meaning, see related notes and get link suggestions.
 
 <br />
 
-[![Release](https://img.shields.io/github/v/release/marioparaschiv/trove?style=for-the-badge&labelColor=0c0c0c&color=c0c0c5)](https://github.com/marioparaschiv/trove/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/marioparaschiv/trove/ci.yml?branch=main&style=for-the-badge&label=ci&labelColor=0c0c0c&color=c0c0c5)](https://github.com/marioparaschiv/trove/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.97-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](https://www.rust-lang.org)
 [![llama.cpp](https://img.shields.io/badge/llama.cpp-b11461-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](https://github.com/ggml-org/llama.cpp)
 [![License](https://img.shields.io/badge/license-MIT-c0c0c5?style=for-the-badge&labelColor=0c0c0c)](./LICENSE)
