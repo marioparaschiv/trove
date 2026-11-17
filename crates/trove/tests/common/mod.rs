@@ -137,8 +137,14 @@ fn collect_notes(root: &Path, folder: &Path, notes: &mut BTreeSet<String>) {
         if path.is_dir() {
             collect_notes(root, &path, notes);
         } else if path.extension().is_some_and(|extension| extension == "md") {
-            let relative = path.strip_prefix(root).unwrap();
-            notes.insert(path_str(relative).to_owned());
+            // `/`-separated on every platform, as the index stores paths.
+            let relative: Vec<&str> = path
+                .strip_prefix(root)
+                .unwrap()
+                .iter()
+                .map(|part| part.to_str().unwrap())
+                .collect();
+            notes.insert(relative.join("/"));
         }
     }
 }

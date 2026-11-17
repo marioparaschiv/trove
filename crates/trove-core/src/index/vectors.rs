@@ -114,6 +114,8 @@ impl Index {
     /// Writes the vector scan file again from the index's vectors.
     pub(crate) fn rebuild_vector_scan(&mut self) -> Result<(), VectorScanError> {
         let version = self.version()?;
+        // Unmapped first: Windows can't replace a file while it is mapped.
+        self.vector_scan = None;
         let scan = VectorScan::build(&self.conn, &self.vector_scan_path, &self.vector_version()?)?;
         self.vector_scan = Some((version, scan));
 
@@ -141,9 +143,13 @@ impl Index {
         if !checked {
             let vector_version = self.vector_version()?;
             let fingerprint = vector_scan::fingerprint(&self.conn)?;
-            let scan = match VectorScan::open(&self.vector_scan_path)? {
-                Some(scan) if scan.is_current(&vector_version, &fingerprint) => scan,
-                _ => VectorScan::build(&self.conn, &self.vector_scan_path, &vector_version)?,
+            // Every mapping of the file is dropped before it is written again: Windows can't replace a mapped file.
+            self.vector_scan = None;
+            let current = VectorScan::open(&self.vector_scan_path)?
+                .filter(|scan| scan.is_current(&vector_version, &fingerprint));
+            let scan = match current {
+                Some(scan) => scan,
+                None => VectorScan::build(&self.conn, &self.vector_scan_path, &vector_version)?,
             };
             self.vector_scan = Some((version, scan));
         }

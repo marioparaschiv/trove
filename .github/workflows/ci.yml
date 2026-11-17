@@ -129,7 +129,7 @@ jobs:
         run: cargo clippy --locked --all-targets -- --deny warnings
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test --locked --no-fail-fast
 
       # The client checks generate the API schema and run their tests against this build of trove.
       - uses: oven-sh/setup-bun@v2.2.0
