@@ -39,7 +39,8 @@ impl StageSwitches {
 pub enum Searcher {
     Service(Service),
     Local {
-        index: Mutex<Index>,
+        // Boxed: the index is far larger than the service variant on Windows (Clippy's large_enum_variant).
+        index: Box<Mutex<Index>>,
         embedder: Embedder,
     },
 }
@@ -49,7 +50,7 @@ impl Searcher {
         Ok(match Service::connect(&ctx.data_dir)? {
             Some(service) => Self::Service(service),
             None => Self::Local {
-                index: Mutex::new(Index::open(&ctx.data_dir)?),
+                index: Box::new(Mutex::new(Index::open(&ctx.data_dir)?)),
                 embedder: Embedder::from_config(&ctx.data_dir, &ctx.config),
             },
         })
