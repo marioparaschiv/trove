@@ -137,7 +137,7 @@ fn a_chunk_of_digits_gets_no_vector_and_is_found_by_its_words() {
     let response = search(data_dir.path(), "05342");
     assert_eq!(result_paths(&response), ["Meter readings.md"], "{response}");
     assert_eq!(
-        response["results"][0]["heading_path"],
+        response["results"][0]["matches"][0]["heading_path"],
         json!(["Meter readings", "2024"])
     );
 }

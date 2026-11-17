@@ -146,10 +146,11 @@ export class RelatedNotes {
       item
         .createDiv({ cls: "tree-item-self search-result-file-title is-clickable" })
         .createDiv({ cls: "tree-item-inner", text: result.title });
-      if (result.heading_path.length > 0) {
+      const headingPath = result.matches[0]?.heading_path ?? [];
+      if (headingPath.length > 0) {
         item
           .createDiv({ cls: "search-result-file-matches" })
-          .createDiv({ cls: "search-result-file-match", text: result.heading_path.join(" > ") });
+          .createDiv({ cls: "search-result-file-match", text: headingPath.join(" > ") });
       }
 
       item.addEventListener("click", (evt) => {

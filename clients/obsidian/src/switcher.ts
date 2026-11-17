@@ -75,10 +75,11 @@ export class Switcher extends SuggestModal<Suggestion> {
       return;
     }
 
-    const { path, heading_path } = suggestion.result;
+    const { path, matches } = suggestion.result;
+    const headingPath = matches[0]?.heading_path ?? [];
     title.setText(linkPath(path));
-    if (heading_path.length > 0) {
-      content.createDiv({ cls: "suggestion-note", text: heading_path.join(" > ") });
+    if (headingPath.length > 0) {
+      content.createDiv({ cls: "suggestion-note", text: headingPath.join(" > ") });
     }
   }
 

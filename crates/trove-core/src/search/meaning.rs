@@ -66,6 +66,7 @@ impl Stage for Meaning<'_> {
                 score: z,
                 why: BTreeSet::from([Signal::Meaning]),
                 coverage: None,
+                chunks: Vec::new(),
             })
             .collect();
         matches.sort_by(|a, b| b.score.total_cmp(&a.score));

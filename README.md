@@ -195,7 +195,7 @@ Search runs as a pipeline of stages. A request can turn any stage off, to measur
 2. **Words.** SQLite FTS5 with BM25 and Porter stemming over each chunk's title, heading path and text. A word that matches nothing falls back to a trigram table, for typos and for Chinese, Japanese and Thai.
 3. **Scoring.** Each note is scored from its meaning z-score, its weighted share of the query's words, and a bonus for a second section that also stands out. Lookups such as `TRV-8812` weight exact words higher.
 4. **Graph rerank.** Personalised PageRank, seeded by the candidates, blends each note's graph rank into its score. It can also add linked notes that matched nothing directly.
-5. **Collapse.** One result per note, pointing at its best heading and listing the stages that found it.
+5. **Collapse.** One result per note, listing the stages that found it and up to three of its best chunks. Each match gives its heading path, its UTF-8 byte span and lines in the file, and a snippet with the query's words marked, typo-corrected ones included.
 
 The graph joins notes to their sections, links (wikilinks, Markdown links, heading and block links), tags, and sections with cosine similarity of 0.75 or more. Related notes and categories walk the same graph.
 

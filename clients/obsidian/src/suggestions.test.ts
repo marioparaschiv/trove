@@ -6,7 +6,14 @@ const retryBackoff: TroveResult = {
   source: "/home/ada/Vault",
   path: "Engineering/Retry backoff.md",
   title: "Retry backoff",
-  heading_path: ["Retry backoff", "Jitter"],
+  kind: "markdown",
+  matches: [
+    {
+      score: 1,
+      heading_path: ["Retry backoff", "Jitter"],
+      location: { type: "text", byte_start: 0, byte_end: 1 },
+    },
+  ],
   score: 3.4,
   why: ["meaning"],
 };
@@ -15,7 +22,10 @@ const kyoto: TroveResult = {
   source: "/home/ada/Vault",
   path: "Travel/Kyoto.md",
   title: "Kyoto",
-  heading_path: ["Kyoto"],
+  kind: "markdown",
+  matches: [
+    { score: 1, heading_path: ["Kyoto"], location: { type: "text", byte_start: 0, byte_end: 1 } },
+  ],
   score: 2.9,
   why: ["meaning", "words"],
 };

@@ -25,8 +25,9 @@ export async function vaultSource(
 }
 
 /** A link to a Trove result's note, at its heading. */
-export function noteLink({ path, heading_path }: TroveResult): string {
-  return [path, ...heading_path.map(stripHeadingForLink)].join("#");
+export function noteLink({ path, matches }: TroveResult): string {
+  const headingPath = matches[0]?.heading_path ?? [];
+  return [path, ...headingPath.map(stripHeadingForLink)].join("#");
 }
 
 export function message(error: unknown): string {

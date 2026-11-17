@@ -15,6 +15,7 @@ impl Stage for AppendChunk {
             score: 1.0,
             why: BTreeSet::new(),
             coverage: None,
+            chunks: Vec::new(),
         });
 
         Ok(candidates)

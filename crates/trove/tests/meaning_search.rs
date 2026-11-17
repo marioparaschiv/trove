@@ -70,7 +70,7 @@ fn assert_found_first(response: &Value, paraphrase: &Paraphrase) {
         paraphrase.query
     );
     assert_eq!(
-        best["heading_path"],
+        best["matches"][0]["heading_path"],
         json!(paraphrase.heading_path),
         "{}: {response}",
         paraphrase.query
@@ -84,7 +84,22 @@ fn a_paraphrase_sharing_no_words_finds_its_note_first_at_the_heading() {
 
     for paraphrase in &PARAPHRASES {
         assert_shares_no_words(paraphrase);
-        assert_found_first(&search(data_dir.path(), paraphrase.query), paraphrase);
+        let response = search(data_dir.path(), paraphrase.query);
+        assert_found_first(&response, paraphrase);
+        // Located to its lines; found by meaning alone, it has none of the query's words to mark. ("repairing"
+        // shares its stem with the note's "repair".)
+        let best = &response["results"][0];
+        assert!(
+            best["matches"][0]["location"]["line_start"].is_u64(),
+            "{response}"
+        );
+        if best["why"] == json!(["meaning"]) {
+            assert_eq!(
+                best["matches"][0]["snippet"]["highlights"],
+                json!([]),
+                "{response}"
+            );
+        }
     }
 }
 

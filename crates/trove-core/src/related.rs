@@ -94,10 +94,11 @@ pub fn related(
             score: rank / best,
             why: BTreeSet::from([Signal::Graph]),
             coverage: None,
+            chunks: Vec::new(),
         })
         .collect();
 
     Ok(SearchResponse {
-        results: search::results(&index::lock(index), &candidates)?,
+        results: search::results(index, &candidates, None)?,
     })
 }

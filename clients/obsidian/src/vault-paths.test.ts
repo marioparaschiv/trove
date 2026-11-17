@@ -4,7 +4,17 @@ import type { TroveResult } from "./suggestions.ts";
 import { inVault } from "./vault-paths.ts";
 
 function result(source: string, path: string): TroveResult {
-  return { source, path, title: path, heading_path: [], score: 1, why: ["meaning"] };
+  return {
+    source,
+    path,
+    title: path,
+    kind: "markdown",
+    matches: [
+      { score: 1, heading_path: [], location: { type: "text", byte_start: 0, byte_end: 1 } },
+    ],
+    score: 1,
+    why: ["meaning"],
+  };
 }
 
 test("keeps only results from the vault's folder", () => {

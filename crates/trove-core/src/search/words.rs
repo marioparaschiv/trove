@@ -141,7 +141,7 @@ impl<'a> Words<'a> {
 }
 
 /// How one query word is looked for.
-enum Pattern {
+pub(super) enum Pattern {
     /// An FTS5 pattern over `chunks_fts`.
     Words(String),
     /// A run of characters anywhere in a chunk.
@@ -222,6 +222,7 @@ impl Stage for Words<'_> {
                 score: 0.0,
                 why: BTreeSet::from([Signal::Words]),
                 coverage: Some(coverage[&file_id]),
+                chunks: Vec::new(),
             });
         }
 
@@ -309,7 +310,7 @@ pub(super) fn has_digit(term: &str) -> bool {
 /// a term in Chinese, Japanese or Thai is a run of characters ([`is_unsegmented`]). A term of a language that attaches
 /// endings ([`inflects`]) is a prefix, so is a term of [`MIN_PREFIX_CHARS`] or more: "grok" finds "grokipedia". A term
 /// that matches nothing even so stands for the closest word in the index ([`closest_word`]) when it has one.
-fn patterns(conn: &Connection, terms: &[String]) -> rusqlite::Result<Vec<Pattern>> {
+pub(super) fn patterns(conn: &Connection, terms: &[String]) -> rusqlite::Result<Vec<Pattern>> {
     let mut is_indexed =
         conn.prepare("SELECT 1 FROM chunks_fts WHERE chunks_fts MATCH ?1 LIMIT 1")?;
 
