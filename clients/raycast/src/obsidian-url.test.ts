@@ -9,7 +9,14 @@ test("opens the note at its best heading", () => {
     source,
     path: "Software/Retry backoff.md",
     title: "Retry backoff",
-    heading_path: ["Retry backoff", "Jitter"],
+    kind: "markdown",
+    matches: [
+      {
+        score: 1,
+        heading_path: ["Retry backoff", "Jitter"],
+        location: { type: "text", byte_start: 0, byte_end: 1 },
+      },
+    ],
     score: 3.4,
     why: ["meaning"],
   });
@@ -22,7 +29,10 @@ test("opens the note at the top when the match is before the first heading", () 
     source,
     path: "Nature/Birding journal.md",
     title: "Birding journal",
-    heading_path: [],
+    kind: "markdown",
+    matches: [
+      { score: 1, heading_path: [], location: { type: "text", byte_start: 0, byte_end: 1 } },
+    ],
     score: 2.9,
     why: ["meaning"],
   });
@@ -35,7 +45,14 @@ test("encodes characters that would end or split a query value", () => {
     source,
     path: "Cooking/Bread & butter + jam.md",
     title: "Bread & butter + jam",
-    heading_path: ["Ratios: 100% hydration?"],
+    kind: "markdown",
+    matches: [
+      {
+        score: 1,
+        heading_path: ["Ratios: 100% hydration?"],
+        location: { type: "text", byte_start: 0, byte_end: 1 },
+      },
+    ],
     score: 3.1,
     why: ["meaning"],
   });

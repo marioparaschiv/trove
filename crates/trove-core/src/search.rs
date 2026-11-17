@@ -1,8 +1,10 @@
 mod collapse;
 pub mod features;
 mod graph;
+mod highlights;
 mod meaning;
 mod request;
+mod result;
 mod scoring;
 mod weights;
 mod words;
@@ -24,14 +26,16 @@ use crate::{
 pub(crate) use collapse::CollapseToNotes;
 pub(crate) use graph::GraphRerank;
 pub(crate) use meaning::Meaning;
-pub(crate) use request::results;
-pub use request::{
-    DEFAULT_LIMIT, SearchRequest, SearchResponse, SearchResult, search, search_with,
-};
+pub use request::{DEFAULT_LIMIT, SearchRequest, SearchResponse, search, search_with};
+pub(crate) use result::results;
+pub use result::{Highlight, Kind, Location, Match, SearchResult, Snippet};
 pub(crate) use scoring::Scoring;
 pub use scoring::Signals;
 pub use weights::{WEIGHTS, Weights};
 pub(crate) use words::Words;
+
+/// The most matches a result lists: its file's best chunks.
+const MAX_MATCHES: usize = 3;
 
 pub struct Query {
     pub text: String,
@@ -67,6 +71,9 @@ pub struct Candidate {
     /// How much of the query the chunk's note has, for a chunk found by words. `Some` marks a word match, whose score
     /// is unused: scoring reads the coverage.
     pub coverage: Option<Coverage>,
+    /// For a candidate standing for its note: the note's best matching chunks with each chunk's own score, best first,
+    /// `chunk_id` first. Empty for a candidate that is one chunk.
+    pub chunks: Vec<(i64, f32)>,
 }
 
 /// How much of the query's words a note has.

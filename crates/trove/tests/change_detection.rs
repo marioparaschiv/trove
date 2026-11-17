@@ -30,7 +30,7 @@ fn edit_one_section(vault: &Path) {
 fn assert_finds_the_edited_section(response: &Value) {
     assert_eq!(response["results"][0]["path"], EDITED_NOTE, "{response}");
     assert_eq!(
-        response["results"][0]["heading_path"],
+        response["results"][0]["matches"][0]["heading_path"],
         json!(["Kyoto", "Arashiyama"]),
         "{response}"
     );

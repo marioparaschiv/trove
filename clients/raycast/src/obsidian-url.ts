@@ -7,9 +7,9 @@ import type { Schemas } from "@trove/client";
  * Obsidian names a vault after its folder, and a vault is registered with Trove as one source,
  * so the source folder's name is the vault name.
  */
-export function obsidianUrl({ source, path, heading_path }: Schemas["SearchResult"]): string {
+export function obsidianUrl({ source, path, matches }: Schemas["SearchResult"]): string {
   const note = path.replace(/\.md$/, "");
-  const heading = heading_path.at(-1);
+  const heading = matches[0]?.heading_path.at(-1);
   const file = heading === undefined ? note : `${note}#${heading}`;
 
   // Not URLSearchParams: it encodes spaces as `+`, which Obsidian keeps as a literal `+`.

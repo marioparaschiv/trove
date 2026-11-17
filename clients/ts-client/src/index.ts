@@ -5,6 +5,8 @@ import { isAbsolute, join } from "node:path";
 import createClient, { type Client, type ClientOptions } from "openapi-fetch";
 import type { components, paths } from "./schema.ts";
 
+export { sliceBytes } from "./bytes.ts";
+
 export type Schemas = components["schemas"];
 export type RuntimeFile = Schemas["RuntimeFile"];
 export type TroveClient = Client<paths>;

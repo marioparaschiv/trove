@@ -1,4 +1,4 @@
-use trove_core::search::{DEFAULT_LIMIT, SearchRequest};
+use trove_core::search::{DEFAULT_LIMIT, Location, Match, SearchRequest};
 
 use super::Context;
 use crate::searcher::{Searcher, StageSwitches};
@@ -32,14 +32,39 @@ pub fn run(ctx: &Context, args: Args) -> anyhow::Result<()> {
         println!("no matches");
     }
     for result in &response.results {
-        let mut target = result.path.clone();
-        for heading in &result.heading_path {
-            target.push_str(" > ");
-            target.push_str(heading);
-        }
         let why: Vec<String> = result.why.iter().map(ToString::to_string).collect();
-        println!("{:.4}  {target}  ({})", result.score, why.join(", "));
+        let mut matches = result.matches.iter();
+        let best = matches
+            .next()
+            .map_or_else(|| result.path.clone(), |best| target(&result.path, best));
+        println!("{:.4}  {best}  ({})", result.score, why.join(", "));
+        for other in matches {
+            println!("        {}", target(&result.path, other));
+        }
     }
 
     Ok(())
+}
+
+/// Where a match is: `path:first-last line > heading > heading`.
+fn target(path: &str, found: &Match) -> String {
+    let mut target = path.to_owned();
+    if let Location::Text {
+        line_start: Some(start),
+        line_end: Some(end),
+        ..
+    } = found.location
+    {
+        target.push_str(&if start == end {
+            format!(":{start}")
+        } else {
+            format!(":{start}-{end}")
+        });
+    }
+    for heading in &found.heading_path {
+        target.push_str(" > ");
+        target.push_str(heading);
+    }
+
+    target
 }

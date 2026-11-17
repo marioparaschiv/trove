@@ -62,7 +62,11 @@ fn each_result_lists_the_stages_that_found_it() {
 
     let plain = run(data_dir.path(), &["search", "boiler"]);
     assert!(
-        plain.ends_with("Home/Boiler service.md > Boiler service  (meaning, words)\n"),
+        plain
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("Home/Boiler service.md:3 > Boiler service  (meaning, words)"),
         "{plain}"
     );
 }

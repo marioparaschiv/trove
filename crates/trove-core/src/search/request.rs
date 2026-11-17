@@ -1,19 +1,13 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Mutex,
-};
+use std::{collections::BTreeSet, sync::Mutex};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{
-    Candidate, CollapseToNotes, GraphRerank, Meaning, Pipeline, Query, Scoring, SearchError,
-    Signal, Stage, WEIGHTS, Weights, Words,
+    CollapseToNotes, GraphRerank, Meaning, Pipeline, Query, Scoring, SearchError, SearchResult,
+    Signal, Stage, WEIGHTS, Weights, Words, results,
 };
-use crate::{
-    embedder::Embedder,
-    index::{self, Index},
-};
+use crate::{embedder::Embedder, index::Index};
 
 pub const DEFAULT_LIMIT: u32 = 10;
 
@@ -21,7 +15,7 @@ pub const DEFAULT_LIMIT: u32 = 10;
 #[serde(deny_unknown_fields)]
 pub struct SearchRequest {
     pub query: String,
-    /// The most notes to return. Defaults to 10.
+    /// The most files to return. Defaults to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(minimum = 1)]
     pub limit: Option<u32>,
@@ -34,21 +28,6 @@ pub struct SearchRequest {
 pub struct SearchResponse {
     /// Best first. Empty when nothing matches.
     pub results: Vec<SearchResult>,
-}
-
-/// A note, pointing at its best matching chunk.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-pub struct SearchResult {
-    /// The source folder the note is in, as registered.
-    pub source: String,
-    /// The note's path in its source, `/`-separated.
-    pub path: String,
-    pub title: String,
-    /// The headings above the best chunk, outermost first. Empty for text before the first heading.
-    pub heading_path: Vec<String>,
-    pub score: f32,
-    /// The stages that found the note.
-    pub why: BTreeSet<Signal>,
 }
 
 /// Finds the notes that best match `request`.
@@ -96,50 +75,11 @@ pub fn search_with(
     candidates.truncate(limit as usize);
 
     Ok(SearchResponse {
-        results: results(&index::lock(index), &candidates)?,
+        // The query's words are marked only where search by words found them.
+        results: results(
+            index,
+            &candidates,
+            (!request.skip.contains(&Signal::Words)).then_some(text),
+        )?,
     })
-}
-
-pub(crate) fn results(
-    index: &Index,
-    candidates: &[Candidate],
-) -> rusqlite::Result<Vec<SearchResult>> {
-    let chunk_ids: Vec<i64> = candidates
-        .iter()
-        .map(|candidate| candidate.chunk_id)
-        .collect();
-    let mut statement = index.connection().prepare(
-        "SELECT c.id, s.path, f.path, f.title, c.heading_path
-         FROM chunks c
-         JOIN files f ON f.id = c.file_id
-         JOIN sources s ON s.id = f.source_id
-         WHERE c.id IN (SELECT value FROM json_each(?1))",
-    )?;
-    let mut notes: HashMap<i64, (String, String, String, String)> = statement
-        .query_map([serde_json::Value::from(chunk_ids).to_string()], |row| {
-            Ok((
-                row.get(0)?,
-                (row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?),
-            ))
-        })?
-        .collect::<Result<_, _>>()?;
-
-    Ok(candidates
-        .iter()
-        .filter_map(|candidate| {
-            let (source, path, title, heading_path) = notes.remove(&candidate.chunk_id)?;
-            Some(SearchResult {
-                source,
-                path,
-                title,
-                heading_path: if heading_path.is_empty() {
-                    Vec::new()
-                } else {
-                    heading_path.split('\n').map(str::to_owned).collect()
-                },
-                score: candidate.score,
-                why: candidate.why.clone(),
-            })
-        })
-        .collect())
 }

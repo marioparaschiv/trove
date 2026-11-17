@@ -58,7 +58,7 @@ function Results({ client, query, onQueryChange }: ResultsProps) {
         <List.Item
           key={`${result.source}/${result.path}`}
           title={result.title}
-          subtitle={result.heading_path.join(" > ")}
+          subtitle={(result.matches[0]?.heading_path ?? []).join(" > ")}
           accessories={[{ text: result.path }]}
           actions={
             <ActionPanel>

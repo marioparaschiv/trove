@@ -4,7 +4,9 @@ use std::{
     sync::Mutex,
 };
 
-use super::{Candidate, Coverage, Query, SearchError, Signal, Stage, Weights, note_ids, words};
+use super::{
+    Candidate, Coverage, MAX_MATCHES, Query, SearchError, Signal, Stage, Weights, note_ids, words,
+};
 use crate::index::{self, Index};
 
 /// How many standard deviations above this query's average a note's best chunk must score to match by meaning. Set by
@@ -23,7 +25,7 @@ const TOP_CHUNKS: usize = 3;
 /// meaning stands out ([`MIN_Z`]) or it has at least [`MIN_COVERAGE`] of the query's words, all words alike, and
 /// scores by its [`Signals`] ([`Weights::score`]). Adds one candidate per matching note, best first: its best chunk by
 /// meaning when that stands out, else its best word match. It lists meaning when meaning stood out and words when the
-/// note has any of the words.
+/// note has any of the words, and the note's best matching chunks ([`best_chunks`]).
 pub struct Scoring<'a> {
     index: &'a Mutex<Index>,
     weights: Weights,
@@ -67,18 +69,17 @@ impl Weights {
     }
 }
 
-/// [`Signals::next_z`] from a note's chunks' z-scores.
-fn next_z(scores: &mut [f32]) -> f32 {
-    scores.sort_by(|a, b| b.total_cmp(a));
+/// [`Signals::next_z`] from a note's chunks and their z-scores, best first.
+fn next_z(chunks: &[(i64, f32)]) -> f32 {
     let shares = iter::successors(Some(1.0), |share| Some(share / 2.0));
 
-    scores
+    chunks
         .iter()
         .skip(1)
         .take(TOP_CHUNKS - 1)
-        .take_while(|&&z| z >= MIN_Z)
+        .take_while(|&&(_, z)| z >= MIN_Z)
         .zip(shares)
-        .map(|(z, share)| share * z)
+        .map(|((_, z), share)| share * z)
         .sum()
 }
 
@@ -89,6 +90,10 @@ pub(super) struct Match {
     pub chunk_id: i64,
     pub why: BTreeSet<Signal>,
     pub signals: Signals,
+    /// The chunks meaning added, and their z-scores, best first.
+    pub meaning_chunks: Vec<(i64, f32)>,
+    /// The chunks words found, best BM25 first.
+    pub word_chunks: Vec<i64>,
 }
 
 /// What the stages before found in one note.
@@ -96,10 +101,12 @@ pub(super) struct Match {
 struct Note {
     /// The best chunk by meaning, and its z-score.
     meaning: Option<(i64, f32)>,
-    /// The z-scores of the chunks meaning added.
-    meaning_scores: Vec<f32>,
+    /// The chunks meaning added, and their z-scores.
+    meaning_chunks: Vec<(i64, f32)>,
     /// The best chunk by words, and the note's coverage.
     words: Option<(i64, Coverage)>,
+    /// The chunks words found, best BM25 first.
+    word_chunks: Vec<i64>,
 }
 
 /// The notes that match, from the candidates of the stages before, in no order.
@@ -116,11 +123,13 @@ pub(super) fn matches(index: &Index, candidates: Vec<Candidate>) -> rusqlite::Re
             if note.words.is_none() {
                 note.words = Some((candidate.chunk_id, coverage));
             }
+            note.word_chunks.push(candidate.chunk_id);
         } else {
             if note.meaning.is_none_or(|(_, z)| candidate.score > z) {
                 note.meaning = Some((candidate.chunk_id, candidate.score));
             }
-            note.meaning_scores.push(candidate.score);
+            note.meaning_chunks
+                .push((candidate.chunk_id, candidate.score));
         }
     }
 
@@ -148,15 +157,18 @@ pub(super) fn matches(index: &Index, candidates: Vec<Candidate>) -> rusqlite::Re
             }
             .expect("a note that matches has the chunk it matched by");
 
+            note.meaning_chunks.sort_by(|a, b| b.1.total_cmp(&a.1));
             Some(Match {
                 file_id,
                 chunk_id,
                 why,
                 signals: Signals {
                     best_z,
-                    next_z: next_z(&mut note.meaning_scores),
+                    next_z: next_z(&note.meaning_chunks),
                     coverage,
                 },
+                meaning_chunks: note.meaning_chunks,
+                word_chunks: note.word_chunks,
             })
         })
         .collect())
@@ -175,6 +187,7 @@ impl Stage for Scoring<'_> {
                 let candidate = Candidate {
                     chunk_id: note.chunk_id,
                     score: self.weights.score(&note.signals, lookup),
+                    chunks: best_chunks(&note, &self.weights, lookup),
                     why: note.why,
                     coverage: None,
                 };
@@ -189,10 +202,87 @@ impl Stage for Scoring<'_> {
     }
 }
 
+/// A matching note's best chunks, up to [`MAX_MATCHES`], each scored on its own as a note with only that chunk would
+/// be: its z-score when it stands out ([`MIN_Z`]) and the note's coverage when it has any of the words. The chunk the
+/// note matched by comes first, then the others that stand out or have words, best first.
+fn best_chunks(note: &Match, weights: &Weights, lookup: bool) -> Vec<(i64, f32)> {
+    let standing_out = note.meaning_chunks.iter().take_while(|&&(_, z)| z >= MIN_Z);
+    let score = |chunk_id: i64| {
+        let best_z = standing_out
+            .clone()
+            .find(|&&(id, _)| id == chunk_id)
+            .map_or(0.0, |&(_, z)| z);
+        let coverage = if note.word_chunks.contains(&chunk_id) {
+            note.signals.coverage
+        } else {
+            Coverage::default()
+        };
+        let signals = Signals {
+            best_z,
+            next_z: 0.0,
+            coverage,
+        };
+
+        (chunk_id, weights.score(&signals, lookup))
+    };
+
+    let mut others: Vec<(i64, f32)> = Vec::new();
+    for chunk_id in standing_out
+        .clone()
+        .map(|&(id, _)| id)
+        .chain(note.word_chunks.iter().copied())
+    {
+        if chunk_id != note.chunk_id && others.iter().all(|&(id, _)| id != chunk_id) {
+            others.push(score(chunk_id));
+        }
+    }
+    others.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+    iter::once(score(note.chunk_id))
+        .chain(others)
+        .take(MAX_MATCHES)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::search::WEIGHTS;
+
+    #[test]
+    fn a_notes_best_chunks_start_with_the_one_it_matched_by_then_the_others_that_match_best_first()
+    {
+        let note = Match {
+            file_id: 1,
+            chunk_id: 10,
+            why: BTreeSet::from([Signal::Meaning, Signal::Words]),
+            signals: Signals {
+                best_z: 3.0,
+                next_z: 0.0,
+                coverage: Coverage {
+                    share: 1.0,
+                    weighted: 1.0,
+                    in_title: 0.0,
+                },
+            },
+            // 13 doesn't stand out, so it isn't a match.
+            meaning_chunks: vec![(10, 3.0), (11, 2.5), (13, 1.0)],
+            word_chunks: vec![12, 11],
+        };
+
+        let chunks = best_chunks(&note, &WEIGHTS, false);
+        let ids: Vec<i64> = chunks.iter().map(|&(id, _)| id).collect();
+        // 11 stands out and has the words, 12 only has the words.
+        assert_eq!(ids, [10, 11, 12]);
+        assert!(chunks[1].1 > chunks[2].1);
+
+        let one = Match {
+            meaning_chunks: vec![(10, 3.0)],
+            word_chunks: Vec::new(),
+            ..note
+        };
+        assert_eq!(best_chunks(&one, &WEIGHTS, false).len(), 1);
+    }
 
     #[test]
     fn a_lookup_ranks_a_note_with_every_word_above_a_stronger_meaning_match() {

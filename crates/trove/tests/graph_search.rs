@@ -62,7 +62,7 @@ fn assert_found_by_graph(response: &Value, target: &Target) {
         .unwrap_or_else(|| panic!("{} not found: {response}", target.note));
     assert_eq!(found["why"], json!(["graph"]), "{response}");
     assert_eq!(
-        found["heading_path"],
+        found["matches"][0]["heading_path"],
         json!(target.heading_path),
         "{response}"
     );

@@ -22,7 +22,7 @@ impl From<SearchError> for ApiError {
     }
 }
 
-/// Finds the notes that best match a query, each pointing at its best heading.
+/// Finds the files that best match a query, each with up to three of its best matching parts.
 #[utoipa::path(
     post,
     path = "/search",
