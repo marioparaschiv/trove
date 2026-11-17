@@ -22,6 +22,7 @@ getrandom = "0.4.3"
 half = "2.7.1"
 hex = "0.4.3"
 humantime = "2.4.0"
+ignore = "0.4.34"
 memmap2 = "0.9.11"
 # graspologic's hierarchical Leiden, which is not on crates.io.
 network_partitions = { git = "https://github.com/graspologic-org/graspologic-native", rev = "773181488b4e5b81925e302b972b294fd51f61a4" }

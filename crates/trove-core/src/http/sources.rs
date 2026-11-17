@@ -18,7 +18,7 @@ use super::{
 };
 use crate::index::{self, Index, Source, SourceError};
 
-/// A source folder, by its absolute path on this device.
+/// A source folder or file, by its absolute path on this device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, IntoParams)]
 #[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
@@ -31,7 +31,7 @@ impl From<SourceError> for ApiError {
         let status = match error {
             SourceError::NotAbsolute(_)
             | SourceError::NotUnicode(_)
-            | SourceError::NotAFolder(_) => StatusCode::BAD_REQUEST,
+            | SourceError::NotAFolderOrFile(_) => StatusCode::BAD_REQUEST,
             SourceError::AlreadyAdded(_) => StatusCode::CONFLICT,
             SourceError::NotFound(_) => StatusCode::NOT_FOUND,
             SourceError::Index(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -41,7 +41,7 @@ impl From<SourceError> for ApiError {
     }
 }
 
-/// The registered source folders.
+/// The registered source folders and files.
 #[utoipa::path(
     get,
     path = "/sources",
@@ -59,15 +59,15 @@ pub(super) async fn list(
     Ok(Json(sources))
 }
 
-/// Registers a folder to index. The next index run reads it.
+/// Registers a folder or a single file to index. The next index run reads it.
 #[utoipa::path(
     post,
     path = "/sources",
     request_body = SourcePath,
     responses(
-        (status = CREATED, description = "The folder is a source", body = Source),
-        (status = BAD_REQUEST, description = "The path is not an absolute path to a folder", body = ErrorBody),
-        (status = CONFLICT, description = "The folder is already a source", body = ErrorBody),
+        (status = CREATED, description = "The folder or file is a source", body = Source),
+        (status = BAD_REQUEST, description = "The path is not an absolute path to a folder or file", body = ErrorBody),
+        (status = CONFLICT, description = "The folder or file is already a source", body = ErrorBody),
         (status = INTERNAL_SERVER_ERROR, description = "Writing the index failed", body = ErrorBody),
         Rejected,
     ),
@@ -84,7 +84,7 @@ pub(super) async fn add(
     Ok((StatusCode::CREATED, Json(source)))
 }
 
-/// Unregisters a folder and drops everything indexed from it.
+/// Unregisters a folder or file and drops everything indexed from it.
 #[utoipa::path(
     delete,
     path = "/sources",
@@ -92,7 +92,7 @@ pub(super) async fn add(
     responses(
         (status = OK, description = "The removed source", body = Source),
         (status = BAD_REQUEST, description = "The path is not absolute", body = ErrorBody),
-        (status = NOT_FOUND, description = "The folder is not a source", body = ErrorBody),
+        (status = NOT_FOUND, description = "The folder or file is not a source", body = ErrorBody),
         (status = INTERNAL_SERVER_ERROR, description = "Writing the index failed", body = ErrorBody),
         Rejected,
     ),

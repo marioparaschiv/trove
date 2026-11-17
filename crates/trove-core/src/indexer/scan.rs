@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
-    path::{Path, PathBuf},
+    fs::{self, File},
+    io::{self, Read},
+    path::Path,
     sync::{Arc, Mutex},
     time::UNIX_EPOCH,
 };
@@ -11,11 +12,12 @@ use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 use super::{
-    Indexer, IndexerError, NoteFile,
+    Format, Indexer, IndexerError, NoteFile,
     embed::{EmbedProgress, embed_missing},
     frontmatter::properties,
     neighbours::update_graph_edges,
     store::{chunks_for, import_vectors, read_vector_file, write_vector_files},
+    walk::{self, Found},
 };
 use crate::{
     config::Config,
@@ -25,7 +27,8 @@ use crate::{
     sync_store::{SyncStore, VectorFile},
 };
 
-const NOTE_EXTENSION: &str = "md";
+/// A plain text file with a NUL byte this early is taken to be binary, as Git does.
+const BINARY_PEEK: u64 = 8 * 1024;
 
 /// Which notes an index run chunks and which chunk texts it embeds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -66,13 +69,6 @@ impl IndexProblem {
             message: full_message(error),
         }
     }
-}
-
-/// A note found in a source.
-struct Found {
-    path: PathBuf,
-    /// Relative to the source, `/`-separated.
-    relative: String,
 }
 
 /// The `files` row of a note as last indexed.
@@ -173,13 +169,14 @@ fn index_source(
     report: &mut IndexReport,
 ) -> Result<Vec<i64>, IndexerError> {
     let root = Path::new(&source.path);
-    let mut listing = Listing::default();
     // A source that can't be read now (an unplugged drive) keeps what was indexed from it.
-    if let Err(error) = find_notes(root, "", &config.store_folder, &mut listing, report) {
-        report.problems.push(IndexProblem::new(root, &error));
-        return Ok(Vec::new());
-    }
-    let found = listing.found;
+    let listing = match walk::list(root, &config.store_folder, report) {
+        Ok(listing) => listing,
+        Err(error) => {
+            report.problems.push(IndexProblem::new(root, &error));
+            return Ok(Vec::new());
+        }
+    };
 
     let store = SyncStore::new(root, &config.store_folder);
     for error in store.remove_conflict_copies() {
@@ -189,21 +186,43 @@ fn index_source(
     let mut written = Vec::new();
 
     let stored = stored_notes(index, source.id)?;
-    for note in &found {
+    // The notes found that are still text, even if they could not be read this time.
+    let mut found = HashSet::new();
+    for note in &listing.found {
+        let format = Format::of(&note.relative);
         let stored = stored.get(&note.relative);
-        let mtime = match modified(&note.path) {
-            Ok(mtime) => mtime,
+        let (mtime, size) = match modified(&note.path) {
+            Ok(modified) => modified,
             Err(error) => {
                 report.problems.push(IndexProblem::new(&note.path, &error));
+                found.insert(note.relative.as_str());
                 continue;
             }
         };
+        if size > config.max_file_size {
+            // Only text is worth mentioning: binary files are skipped without a word whatever their size.
+            if format == Format::Markdown || is_text_start(&note.path).unwrap_or(false) {
+                report.problems.push(IndexProblem {
+                    path: note.path.display().to_string(),
+                    message: format!(
+                        "the file is larger than max_file_size ({size} > {} bytes)",
+                        config.max_file_size
+                    ),
+                });
+            }
+            continue;
+        }
+        found.insert(note.relative.as_str());
         if mode == IndexMode::Changed && stored.is_some_and(|stored| stored.mtime == mtime) {
             continue;
         }
 
-        let read = match read_note(&note.path, mtime) {
-            Ok(read) => read,
+        let read = match read_note(&note.path, format, mtime) {
+            Ok(Some(read)) => read,
+            Ok(None) => {
+                found.remove(note.relative.as_str());
+                continue;
+            }
             Err(error) => {
                 report.problems.push(IndexProblem::new(&note.path, &error));
                 continue;
@@ -235,7 +254,6 @@ fn index_source(
         report.files += 1;
     }
 
-    let found: HashSet<&str> = found.iter().map(|note| note.relative.as_str()).collect();
     // A note in a folder that couldn't be listed is not gone, so it keeps its index rows and vector file.
     let removed: Vec<&str> = stored
         .keys()
@@ -271,14 +289,6 @@ fn is_in(path: &str, folder: &str) -> bool {
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
-/// What listing a source found.
-#[derive(Default)]
-struct Listing {
-    found: Vec<Found>,
-    /// Folders and entries that could not be listed in full, relative to the source.
-    unlisted: Vec<String>,
-}
-
 fn stored_notes(
     index: &Mutex<Index>,
     source_id: i64,
@@ -302,76 +312,8 @@ fn stored_notes(
     Ok(stored)
 }
 
-/// Collects the notes under `folder`, skipping hidden entries (`.obsidian`, `.trash`, as Obsidian does), the store
-/// folder and symbolic links. Fails only when `folder` itself can't be listed; a subfolder or an entry that can't be is
-/// reported and recorded as unlisted.
-fn find_notes(
-    folder: &Path,
-    relative: &str,
-    store_folder: &str,
-    listing: &mut Listing,
-    report: &mut IndexReport,
-) -> io::Result<()> {
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(folder)? {
-        match entry {
-            Ok(entry) => entries.push(entry),
-            Err(error) => {
-                report.problems.push(IndexProblem::new(folder, &error));
-                listing.unlisted.push(relative.to_owned());
-            }
-        }
-    }
-    entries.sort_by_key(fs::DirEntry::file_name);
-
-    for entry in entries {
-        let path = entry.path();
-        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-            report.problems.push(IndexProblem {
-                path: path.display().to_string(),
-                message: "the name is not valid Unicode".to_owned(),
-            });
-            continue;
-        };
-        if name.starts_with('.') || name == store_folder {
-            continue;
-        }
-
-        let child = if relative.is_empty() {
-            name.clone()
-        } else {
-            format!("{relative}/{name}")
-        };
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(error) => {
-                report.problems.push(IndexProblem::new(&path, &error));
-                listing.unlisted.push(child);
-                continue;
-            }
-        };
-
-        if file_type.is_dir() {
-            if let Err(error) = find_notes(&path, &child, store_folder, listing, report) {
-                report.problems.push(IndexProblem::new(&path, &error));
-                listing.unlisted.push(child);
-            }
-        } else if file_type.is_file()
-            && Path::new(&name)
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case(NOTE_EXTENSION))
-        {
-            listing.found.push(Found {
-                path,
-                relative: child,
-            });
-        }
-    }
-
-    Ok(())
-}
-
 struct ReadNote {
+    format: Format,
     text: String,
     title: String,
     mtime: i64,
@@ -390,42 +332,75 @@ enum ReadError {
     Mtime,
 }
 
-/// The note's modification time in nanoseconds since the Unix epoch.
-fn modified(path: &Path) -> Result<i64, ReadError> {
-    fs::metadata(path)?
+/// The note's modification time in nanoseconds since the Unix epoch, and its size in bytes.
+fn modified(path: &Path) -> Result<(i64, u64), ReadError> {
+    let metadata = fs::metadata(path)?;
+    let mtime = metadata
         .modified()?
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|since| i64::try_from(since.as_nanos()).ok())
-        .ok_or(ReadError::Mtime)
+        .ok_or(ReadError::Mtime)?;
+
+    Ok((mtime, metadata.len()))
+}
+
+/// Reads the start of `file` into `bytes` and returns whether it looks like text: no NUL byte.
+fn read_text_start(file: &mut File, bytes: &mut Vec<u8>) -> io::Result<bool> {
+    file.take(BINARY_PEEK).read_to_end(bytes)?;
+
+    Ok(!bytes.contains(&0))
+}
+
+/// Whether the file at `path` starts like text.
+fn is_text_start(path: &Path) -> io::Result<bool> {
+    read_text_start(&mut File::open(path)?, &mut Vec::new())
 }
 
 /// Reads a note whose modification time was `mtime` just before. Taking it first means a write in between leaves an
-/// older time behind, so the next run reads the note again.
-fn read_note(path: &Path, mtime: i64) -> Result<ReadNote, ReadError> {
-    let bytes = fs::read(path)?;
+/// older time behind, so the next run reads the note again. A plain text file that turns out binary or not UTF-8 is
+/// `None`: it is not text, so it is not a note.
+fn read_note(path: &Path, format: Format, mtime: i64) -> Result<Option<ReadNote>, ReadError> {
+    let mut file = File::open(path)?;
+    let mut bytes = Vec::new();
+    if format == Format::PlainText && !read_text_start(&mut file, &mut bytes)? {
+        return Ok(None);
+    }
+    file.read_to_end(&mut bytes)?;
+
     let hash = Sha256::digest(&bytes).to_vec();
-    let text = String::from_utf8(bytes).map_err(|_| ReadError::NotUtf8)?;
-    let title = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
+    let text = match (String::from_utf8(bytes), format) {
+        (Ok(text), _) => text,
+        (Err(_), Format::Markdown) => return Err(ReadError::NotUtf8),
+        (Err(_), Format::PlainText) => return Ok(None),
+    };
+    let name = match format {
+        Format::Markdown => path.file_stem(),
+        Format::PlainText => path.file_name(),
+    };
+    let title = name
+        .and_then(|name| name.to_str())
         .expect("notes are found by their Unicode name")
         .to_owned();
 
     // A note with broken frontmatter is still worth finding, so it is indexed without properties.
-    let (properties, properties_problem) = match properties(&text) {
-        Ok(properties) => (properties, None),
-        Err(error) => (Default::default(), Some(IndexProblem::new(path, &error))),
+    let (properties, properties_problem) = match format {
+        Format::Markdown => match properties(&text) {
+            Ok(properties) => (properties, None),
+            Err(error) => (Default::default(), Some(IndexProblem::new(path, &error))),
+        },
+        Format::PlainText => (Default::default(), None),
     };
 
-    Ok(ReadNote {
+    Ok(Some(ReadNote {
+        format,
         title,
         mtime,
         hash,
         properties: serde_json::Value::Object(properties).to_string(),
         properties_problem,
         text,
-    })
+    }))
 }
 
 fn write_note(
@@ -468,6 +443,7 @@ fn write_note(
             id,
             title: &read.title,
             text: &read.text,
+            format: read.format,
             stored_chunks: stored.and_then(|stored| chunks_for(stored, &read.text, &read.hash)),
         },
     )?;

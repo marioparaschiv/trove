@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use rusqlite::Transaction;
 
-use super::{FileProcessor, IndexerError, NoteFile, chunker::Fence, frontmatter::Frontmatter};
+use super::{
+    FileProcessor, Format, IndexerError, NoteFile, chunker::Fence, frontmatter::Frontmatter,
+};
 use crate::graph::{EdgeKind, NodeKey};
 
 /// Weights from spec "Graph".
@@ -12,7 +14,7 @@ const TAG_WEIGHT: f32 = 0.5;
 
 /// Writes a note's own edges: wikilinks (with heading and block targets), embeds and markdown links in the body as
 /// links, tags in the body and the `tags` property as tags, and links in any other property as property links. Code
-/// is skipped. Targets are stored as written and resolved when the graph is built.
+/// is skipped. Targets are stored as written and resolved when the graph is built. Plain text files have none.
 pub struct LinkParser;
 
 impl FileProcessor for LinkParser {
@@ -22,6 +24,9 @@ impl FileProcessor for LinkParser {
             "DELETE FROM edges WHERE src = ?1 AND kind IN (?2, ?3, ?4)",
             (&src, EdgeKind::Link, EdgeKind::PropertyLink, EdgeKind::Tag),
         )?;
+        if note.format == Format::PlainText {
+            return Ok(());
+        }
 
         let mut body = Found::default();
         let body_start = Frontmatter::find(note.text).map_or(0, |frontmatter| frontmatter.end);

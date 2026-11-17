@@ -19,6 +19,8 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
+use crate::index::source_root;
+
 pub use decisions::{CategoryPin, Decision, DecisionError, SuggestionState, note_pair};
 
 const VECTORS_FOLDER: &str = "vectors";
@@ -86,9 +88,10 @@ pub enum StoreError {
 }
 
 impl SyncStore {
+    /// The store of the source at `source`, a folder or a file. A file's store is in the folder holding it.
     pub fn new(source: &Path, store_folder: &str) -> Self {
         Self {
-            root: source.join(store_folder),
+            root: source_root(source).join(store_folder),
         }
     }
 

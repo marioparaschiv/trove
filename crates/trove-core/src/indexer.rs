@@ -5,6 +5,7 @@ mod links;
 mod neighbours;
 mod scan;
 mod store;
+mod walk;
 
 use std::sync::Arc;
 
@@ -38,11 +39,36 @@ impl From<rusqlite::Error> for IndexerError {
     }
 }
 
+/// How a note's text is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// A `.md` note: frontmatter, headings, links and tags.
+    Markdown,
+    /// Any other text file: paragraphs only.
+    PlainText,
+}
+
+impl Format {
+    /// The format of the note at `path`, by its extension.
+    pub fn of(path: &str) -> Self {
+        let markdown = std::path::Path::new(path)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+
+        if markdown {
+            Self::Markdown
+        } else {
+            Self::PlainText
+        }
+    }
+}
+
 /// A note whose `files` row is already written, handed to each processor.
 pub struct NoteFile<'a> {
     pub id: i64,
     pub title: &'a str,
     pub text: &'a str,
+    pub format: Format,
     /// The chunks the sync store holds for exactly this text, already checked against it. The chunker takes them
     /// instead of splitting the note again, which needs the model.
     pub stored_chunks: Option<&'a [StoredChunk]>,

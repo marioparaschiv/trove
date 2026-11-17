@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::{data_dir::DataDir, graph::VaultGraph};
 use vector_scan::VectorScan;
 
-pub use sources::{Source, SourceError};
+pub use sources::{Source, SourceError, source_root};
 pub use stats::IndexStats;
 pub use vector_scan::{VECTOR_SCAN_FILE, VectorScanError};
 pub(crate) use vectors::SectionVector;
