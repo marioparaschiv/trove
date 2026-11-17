@@ -434,6 +434,62 @@ fn with_no_network_setup_waits_for_one() {
     child.wait().unwrap();
 }
 
+const PROJECTOR_FILE: &str = "fixture-mmproj-Q8_0.gguf";
+
+/// Configures a projector for the fixture model: the same bytes under another name.
+fn add_projector(setup: &Setup, sha256: &str) {
+    let config_path = setup.data_dir.join("config.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    let projector = format!(
+        "\n[projector]\nrepo = \"{REPO}\"\nrevision = \"{REVISION}\"\nfile = \"{PROJECTOR_FILE}\"\nsize = {}\nsha256 = \"{sha256}\"\n",
+        fixture().len(),
+    );
+    fs::write(&config_path, config + &projector).unwrap();
+}
+
+#[test]
+fn a_configured_projector_is_downloaded_after_the_model() {
+    let server = Server::start(vec![Reply::Full]);
+    let setup = Setup::new();
+    add_projector(&setup, &hex::encode(Sha256::digest(fixture())));
+
+    let (output, events) = setup.run(&server.endpoint());
+
+    common::stdout(&output);
+    assert_eq!(
+        kinds(&events),
+        ["file", "verifying", "file", "verifying", "done"]
+    );
+    let files: Vec<&str> = events
+        .iter()
+        .filter(|event| event["event"] == "file")
+        .map(|event| event["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(files, [FILE, PROJECTOR_FILE]);
+    assert_eq!(
+        events.last().unwrap()["path"],
+        setup.model().to_str().unwrap()
+    );
+    assert_eq!(fs::read(setup.model()).unwrap(), fixture());
+    let projector = setup.data_dir.join("models").join(PROJECTOR_FILE);
+    assert_eq!(fs::read(projector).unwrap(), fixture());
+    assert_eq!(
+        server.requests()[2],
+        request(format!("/{REPO}/resolve/{REVISION}/{PROJECTOR_FILE}"), None)
+    );
+}
+
+#[test]
+fn invalid_projector_config_fails_naming_the_field() {
+    let setup = Setup::new();
+    add_projector(&setup, "not a hash");
+
+    let (output, _) = setup.run("http://127.0.0.1:9");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("`projector.sha256`"));
+}
+
 #[test]
 fn invalid_model_config_fails_naming_the_field() {
     let setup = Setup::new();

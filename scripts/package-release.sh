@@ -35,10 +35,10 @@ require_backends() {
 case "$platform" in
   # `trove` and libllama find the other libraries through their `$ORIGIN` rpath.
   linux-x86_64)
-    require "$build/trove" "$build/libllama.so.0" "$build/libggml.so.0" "$build/libggml-base.so.0" \
-      "$build/libggml-vulkan.so"
+    require "$build/trove" "$build/libllama.so.0" "$build/libmtmd.so.0" "$build/libggml.so.0" \
+      "$build/libggml-base.so.0" "$build/libggml-vulkan.so"
     require_backends "$build"/libggml-cpu-*.so
-    files=("$build/trove" "$build"/libllama.so* "$build"/libggml*.so*)
+    files=("$build/trove" "$build"/libllama.so* "$build"/libmtmd.so* "$build"/libggml*.so*)
     extension=tar.gz
     ;;
   # Static llama.cpp with the Metal library embedded: the binary is all there is.
@@ -48,9 +48,10 @@ case "$platform" in
     extension=tar.gz
     ;;
   windows-x86_64)
-    require "$build/trove.exe" "$build/llama.dll" "$build/ggml.dll" "$build/ggml-base.dll" "$build/ggml-vulkan.dll"
+    require "$build/trove.exe" "$build/llama.dll" "$build/mtmd.dll" "$build/ggml.dll" "$build/ggml-base.dll" \
+      "$build/ggml-vulkan.dll"
     require_backends "$build"/ggml-cpu-*.dll
-    files=("$build/trove.exe" "$build"/llama.dll "$build"/ggml*.dll)
+    files=("$build/trove.exe" "$build"/llama.dll "$build"/mtmd.dll "$build"/ggml*.dll)
     # The llama.cpp DLLs need the VC++ runtime, which a fresh Windows may not have.
     vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
     runtime=()

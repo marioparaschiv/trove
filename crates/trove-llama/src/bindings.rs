@@ -46,7 +46,7 @@ pub const GGML_TYPE_NVFP4: ggml_type = 40;
 pub const GGML_TYPE_Q1_0: ggml_type = 41;
 pub const GGML_TYPE_Q2_0: ggml_type = 42;
 pub const GGML_TYPE_COUNT: ggml_type = 43;
-pub type ggml_type = ::std::os::raw::c_int;
+pub type ggml_type = ::std::os::raw::c_uint;
 pub const GGML_OP_NONE: ggml_op = 0;
 pub const GGML_OP_DUP: ggml_op = 1;
 pub const GGML_OP_ADD: ggml_op = 2;
@@ -149,14 +149,14 @@ pub const GGML_OP_OPT_STEP_ADAMW: ggml_op = 98;
 pub const GGML_OP_OPT_STEP_SGD: ggml_op = 99;
 pub const GGML_OP_GLU: ggml_op = 100;
 pub const GGML_OP_COUNT: ggml_op = 101;
-pub type ggml_op = ::std::os::raw::c_int;
+pub type ggml_op = ::std::os::raw::c_uint;
 pub const GGML_LOG_LEVEL_NONE: ggml_log_level = 0;
 pub const GGML_LOG_LEVEL_DEBUG: ggml_log_level = 1;
 pub const GGML_LOG_LEVEL_INFO: ggml_log_level = 2;
 pub const GGML_LOG_LEVEL_WARN: ggml_log_level = 3;
 pub const GGML_LOG_LEVEL_ERROR: ggml_log_level = 4;
 pub const GGML_LOG_LEVEL_CONT: ggml_log_level = 5;
-pub type ggml_log_level = ::std::os::raw::c_int;
+pub type ggml_log_level = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ggml_tensor {
@@ -275,7 +275,7 @@ pub const GGML_BACKEND_DEVICE_TYPE_GPU: ggml_backend_dev_type = 1;
 pub const GGML_BACKEND_DEVICE_TYPE_IGPU: ggml_backend_dev_type = 2;
 pub const GGML_BACKEND_DEVICE_TYPE_ACCEL: ggml_backend_dev_type = 3;
 pub const GGML_BACKEND_DEVICE_TYPE_META: ggml_backend_dev_type = 4;
-pub type ggml_backend_dev_type = ::std::os::raw::c_int;
+pub type ggml_backend_dev_type = ::std::os::raw::c_uint;
 unsafe extern "C" {
     pub fn ggml_backend_dev_description(
         device: ggml_backend_dev_t,
@@ -353,7 +353,7 @@ pub const LLAMA_SPLIT_MODE_NONE: llama_split_mode = 0;
 pub const LLAMA_SPLIT_MODE_LAYER: llama_split_mode = 1;
 pub const LLAMA_SPLIT_MODE_ROW: llama_split_mode = 2;
 pub const LLAMA_SPLIT_MODE_TENSOR: llama_split_mode = 3;
-pub type llama_split_mode = ::std::os::raw::c_int;
+pub type llama_split_mode = ::std::os::raw::c_uint;
 pub const LLAMA_LOAD_MODE_AUTO: llama_load_mode = -1;
 pub const LLAMA_LOAD_MODE_NONE: llama_load_mode = 0;
 pub const LLAMA_LOAD_MODE_MMAP: llama_load_mode = 1;
@@ -364,10 +364,10 @@ pub type llama_load_mode = ::std::os::raw::c_int;
 pub const LLAMA_LAZY_MODE_OFF: llama_lazy_mode = 0;
 pub const LLAMA_LAZY_MODE_AUTO: llama_lazy_mode = 1;
 pub const LLAMA_LAZY_MODE_ON: llama_lazy_mode = 2;
-pub type llama_lazy_mode = ::std::os::raw::c_int;
+pub type llama_lazy_mode = ::std::os::raw::c_uint;
 pub const LLAMA_CONTEXT_TYPE_DEFAULT: llama_context_type = 0;
 pub const LLAMA_CONTEXT_TYPE_MTP: llama_context_type = 1;
-pub type llama_context_type = ::std::os::raw::c_int;
+pub type llama_context_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct llama_token_data {
@@ -439,7 +439,10 @@ pub const LLAMA_KV_OVERRIDE_TYPE_INT: llama_model_kv_override_type = 0;
 pub const LLAMA_KV_OVERRIDE_TYPE_FLOAT: llama_model_kv_override_type = 1;
 pub const LLAMA_KV_OVERRIDE_TYPE_BOOL: llama_model_kv_override_type = 2;
 pub const LLAMA_KV_OVERRIDE_TYPE_STR: llama_model_kv_override_type = 3;
-pub type llama_model_kv_override_type = ::std::os::raw::c_int;
+pub type llama_model_kv_override_type = ::std::os::raw::c_uint;
+pub const LLAMA_PROCESS_TYPE_ENCODE: llama_process_type = 0;
+pub const LLAMA_PROCESS_TYPE_DECODE: llama_process_type = 1;
+pub type llama_process_type = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct llama_model_kv_override {
@@ -736,6 +739,9 @@ unsafe extern "C" {
     pub fn llama_model_get_vocab(model: *const llama_model) -> *const llama_vocab;
 }
 unsafe extern "C" {
+    pub fn llama_model_n_embd_inp(model: *const llama_model) -> i32;
+}
+unsafe extern "C" {
     pub fn llama_model_n_embd_out(model: *const llama_model) -> i32;
 }
 unsafe extern "C" {
@@ -746,6 +752,67 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn llama_encode(ctx: *mut llama_context, batch: llama_batch) -> i32;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_batch_ext {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct llama_embd {
+    pub data: *const f32,
+    pub n_rows: usize,
+    pub n_embd: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of llama_embd"][::std::mem::size_of::<llama_embd>() - 24usize];
+    ["Alignment of llama_embd"][::std::mem::align_of::<llama_embd>() - 8usize];
+    ["Offset of field: llama_embd::data"][::std::mem::offset_of!(llama_embd, data) - 0usize];
+    ["Offset of field: llama_embd::n_rows"][::std::mem::offset_of!(llama_embd, n_rows) - 8usize];
+    ["Offset of field: llama_embd::n_embd"][::std::mem::offset_of!(llama_embd, n_embd) - 16usize];
+};
+unsafe extern "C" {
+    pub fn llama_batch_ext_init(ctx: *mut llama_context) -> *mut llama_batch_ext;
+}
+unsafe extern "C" {
+    pub fn llama_batch_ext_free(batch: *mut llama_batch_ext);
+}
+unsafe extern "C" {
+    pub fn llama_batch_ext_add_token(
+        batch: *mut llama_batch_ext,
+        seq_id: llama_seq_id,
+        id: llama_token,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_batch_ext_add_embd(
+        batch: *mut llama_batch_ext,
+        seq_id: llama_seq_id,
+        embd: llama_embd,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn llama_batch_ext_set_output_embd(
+        batch: *mut llama_batch_ext,
+        idx: i32,
+        value: bool,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_batch_ext_set_pos(
+        batch: *mut llama_batch_ext,
+        idx: i32,
+        pos: *const llama_pos,
+    ) -> bool;
+}
+unsafe extern "C" {
+    pub fn llama_process(
+        ctx: *mut llama_context,
+        type_: llama_process_type,
+        batch: *mut llama_batch_ext,
+    ) -> i32;
 }
 unsafe extern "C" {
     pub fn llama_set_n_threads(ctx: *mut llama_context, n_threads: i32, n_threads_batch: i32);
@@ -880,6 +947,269 @@ const _: () = {
 };
 unsafe extern "C" {
     pub fn llama_log_set(log_callback: ggml_log_callback, user_data: *mut ::std::os::raw::c_void);
+}
+pub const MTMD_INPUT_CHUNK_TYPE_TEXT: mtmd_input_chunk_type = 0;
+pub const MTMD_INPUT_CHUNK_TYPE_IMAGE: mtmd_input_chunk_type = 1;
+pub const MTMD_INPUT_CHUNK_TYPE_AUDIO: mtmd_input_chunk_type = 2;
+pub const MTMD_INPUT_CHUNK_TYPE_COUNT: mtmd_input_chunk_type = 3;
+pub type mtmd_input_chunk_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_context {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_bitmap {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_chunk {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_chunks {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_text {
+    pub text: *const ::std::os::raw::c_char,
+    pub text_len: usize,
+    pub add_special: bool,
+    pub parse_special: bool,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of mtmd_input_text"][::std::mem::size_of::<mtmd_input_text>() - 24usize];
+    ["Alignment of mtmd_input_text"][::std::mem::align_of::<mtmd_input_text>() - 8usize];
+    ["Offset of field: mtmd_input_text::text"]
+        [::std::mem::offset_of!(mtmd_input_text, text) - 0usize];
+    ["Offset of field: mtmd_input_text::text_len"]
+        [::std::mem::offset_of!(mtmd_input_text, text_len) - 8usize];
+    ["Offset of field: mtmd_input_text::add_special"]
+        [::std::mem::offset_of!(mtmd_input_text, add_special) - 16usize];
+    ["Offset of field: mtmd_input_text::parse_special"]
+        [::std::mem::offset_of!(mtmd_input_text, parse_special) - 17usize];
+};
+pub type mtmd_progress_callback = ::std::option::Option<
+    unsafe extern "C" fn(progress: f32, user_data: *mut ::std::os::raw::c_void) -> bool,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_context_params {
+    pub use_gpu: bool,
+    pub device: ggml_backend_dev_t,
+    pub print_timings: bool,
+    pub n_threads: ::std::os::raw::c_int,
+    pub image_marker: *const ::std::os::raw::c_char,
+    pub media_marker: *const ::std::os::raw::c_char,
+    pub flash_attn_type: llama_flash_attn_type,
+    pub warmup: bool,
+    pub image_min_tokens: ::std::os::raw::c_int,
+    pub image_max_tokens: ::std::os::raw::c_int,
+    pub cb_eval: ggml_backend_sched_eval_callback,
+    pub cb_eval_user_data: *mut ::std::os::raw::c_void,
+    pub batch_max_tokens: i32,
+    pub progress_callback: mtmd_progress_callback,
+    pub progress_callback_user_data: *mut ::std::os::raw::c_void,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of mtmd_context_params"][::std::mem::size_of::<mtmd_context_params>() - 96usize];
+    ["Alignment of mtmd_context_params"][::std::mem::align_of::<mtmd_context_params>() - 8usize];
+    ["Offset of field: mtmd_context_params::use_gpu"]
+        [::std::mem::offset_of!(mtmd_context_params, use_gpu) - 0usize];
+    ["Offset of field: mtmd_context_params::device"]
+        [::std::mem::offset_of!(mtmd_context_params, device) - 8usize];
+    ["Offset of field: mtmd_context_params::print_timings"]
+        [::std::mem::offset_of!(mtmd_context_params, print_timings) - 16usize];
+    ["Offset of field: mtmd_context_params::n_threads"]
+        [::std::mem::offset_of!(mtmd_context_params, n_threads) - 20usize];
+    ["Offset of field: mtmd_context_params::image_marker"]
+        [::std::mem::offset_of!(mtmd_context_params, image_marker) - 24usize];
+    ["Offset of field: mtmd_context_params::media_marker"]
+        [::std::mem::offset_of!(mtmd_context_params, media_marker) - 32usize];
+    ["Offset of field: mtmd_context_params::flash_attn_type"]
+        [::std::mem::offset_of!(mtmd_context_params, flash_attn_type) - 40usize];
+    ["Offset of field: mtmd_context_params::warmup"]
+        [::std::mem::offset_of!(mtmd_context_params, warmup) - 44usize];
+    ["Offset of field: mtmd_context_params::image_min_tokens"]
+        [::std::mem::offset_of!(mtmd_context_params, image_min_tokens) - 48usize];
+    ["Offset of field: mtmd_context_params::image_max_tokens"]
+        [::std::mem::offset_of!(mtmd_context_params, image_max_tokens) - 52usize];
+    ["Offset of field: mtmd_context_params::cb_eval"]
+        [::std::mem::offset_of!(mtmd_context_params, cb_eval) - 56usize];
+    ["Offset of field: mtmd_context_params::cb_eval_user_data"]
+        [::std::mem::offset_of!(mtmd_context_params, cb_eval_user_data) - 64usize];
+    ["Offset of field: mtmd_context_params::batch_max_tokens"]
+        [::std::mem::offset_of!(mtmd_context_params, batch_max_tokens) - 72usize];
+    ["Offset of field: mtmd_context_params::progress_callback"]
+        [::std::mem::offset_of!(mtmd_context_params, progress_callback) - 80usize];
+    ["Offset of field: mtmd_context_params::progress_callback_user_data"]
+        [::std::mem::offset_of!(mtmd_context_params, progress_callback_user_data) - 88usize];
+};
+unsafe extern "C" {
+    pub fn mtmd_default_marker() -> *const ::std::os::raw::c_char;
+}
+unsafe extern "C" {
+    pub fn mtmd_context_params_default() -> mtmd_context_params;
+}
+unsafe extern "C" {
+    pub fn mtmd_init_from_file(
+        mmproj_fname: *const ::std::os::raw::c_char,
+        text_model: *const llama_model,
+        ctx_params: mtmd_context_params,
+    ) -> *mut mtmd_context;
+}
+unsafe extern "C" {
+    pub fn mtmd_free(ctx: *mut mtmd_context);
+}
+unsafe extern "C" {
+    pub fn mtmd_decode_use_mrope(ctx: *const mtmd_context) -> bool;
+}
+unsafe extern "C" {
+    pub fn mtmd_support_vision(ctx: *const mtmd_context) -> bool;
+}
+unsafe extern "C" {
+    pub fn mtmd_support_audio(ctx: *const mtmd_context) -> bool;
+}
+unsafe extern "C" {
+    pub fn mtmd_get_audio_sample_rate(ctx: *const mtmd_context) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    pub fn mtmd_bitmap_init_from_audio(n_samples: usize, data: *const f32) -> *mut mtmd_bitmap;
+}
+unsafe extern "C" {
+    pub fn mtmd_bitmap_get_data(bitmap: *const mtmd_bitmap) -> *const ::std::os::raw::c_uchar;
+}
+unsafe extern "C" {
+    pub fn mtmd_bitmap_get_n_bytes(bitmap: *const mtmd_bitmap) -> usize;
+}
+unsafe extern "C" {
+    pub fn mtmd_bitmap_is_audio(bitmap: *const mtmd_bitmap) -> bool;
+}
+unsafe extern "C" {
+    pub fn mtmd_bitmap_free(bitmap: *mut mtmd_bitmap);
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunks_init() -> *mut mtmd_input_chunks;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunks_size(chunks: *const mtmd_input_chunks) -> usize;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunks_get(
+        chunks: *const mtmd_input_chunks,
+        idx: usize,
+    ) -> *const mtmd_input_chunk;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunks_free(chunks: *mut mtmd_input_chunks);
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunk_get_type(chunk: *const mtmd_input_chunk) -> mtmd_input_chunk_type;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunk_get_tokens_text(
+        chunk: *const mtmd_input_chunk,
+        n_tokens_output: *mut usize,
+    ) -> *const llama_token;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunk_get_n_tokens(chunk: *const mtmd_input_chunk) -> usize;
+}
+unsafe extern "C" {
+    pub fn mtmd_input_chunk_get_n_pos(chunk: *const mtmd_input_chunk) -> llama_pos;
+}
+unsafe extern "C" {
+    pub fn mtmd_tokenize(
+        ctx: *const mtmd_context,
+        output: *mut mtmd_input_chunks,
+        text: *const mtmd_input_text,
+        bitmaps: *const *const mtmd_bitmap,
+        n_bitmaps: usize,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn mtmd_encode_chunk(ctx: *mut mtmd_context, chunk: *const mtmd_input_chunk) -> i32;
+}
+unsafe extern "C" {
+    pub fn mtmd_get_output_embd(ctx: *mut mtmd_context) -> *mut f32;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_video_init_params {
+    pub fps_target: f32,
+    pub ffmpeg_bin_dir: *const ::std::os::raw::c_char,
+    pub timestamp_interval_ms: i64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of mtmd_helper_video_init_params"]
+        [::std::mem::size_of::<mtmd_helper_video_init_params>() - 24usize];
+    ["Alignment of mtmd_helper_video_init_params"]
+        [::std::mem::align_of::<mtmd_helper_video_init_params>() - 8usize];
+    ["Offset of field: mtmd_helper_video_init_params::fps_target"]
+        [::std::mem::offset_of!(mtmd_helper_video_init_params, fps_target) - 0usize];
+    ["Offset of field: mtmd_helper_video_init_params::ffmpeg_bin_dir"]
+        [::std::mem::offset_of!(mtmd_helper_video_init_params, ffmpeg_bin_dir) - 8usize];
+    ["Offset of field: mtmd_helper_video_init_params::timestamp_interval_ms"]
+        [::std::mem::offset_of!(mtmd_helper_video_init_params, timestamp_interval_ms) - 16usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_init_opt {
+    pub video_params: mtmd_helper_video_init_params,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of mtmd_helper_init_opt"][::std::mem::size_of::<mtmd_helper_init_opt>() - 24usize];
+    ["Alignment of mtmd_helper_init_opt"][::std::mem::align_of::<mtmd_helper_init_opt>() - 8usize];
+    ["Offset of field: mtmd_helper_init_opt::video_params"]
+        [::std::mem::offset_of!(mtmd_helper_init_opt, video_params) - 0usize];
+};
+unsafe extern "C" {
+    pub fn mtmd_helper_init_opt_default() -> mtmd_helper_init_opt;
+}
+unsafe extern "C" {
+    pub fn mtmd_helper_log_set(
+        log_callback: ggml_log_callback,
+        user_data: *mut ::std::os::raw::c_void,
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_helper_bitmap_wrapper {
+    pub bitmap: *mut mtmd_bitmap,
+    pub video_ctx: *mut mtmd_helper_video,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of mtmd_helper_bitmap_wrapper"]
+        [::std::mem::size_of::<mtmd_helper_bitmap_wrapper>() - 16usize];
+    ["Alignment of mtmd_helper_bitmap_wrapper"]
+        [::std::mem::align_of::<mtmd_helper_bitmap_wrapper>() - 8usize];
+    ["Offset of field: mtmd_helper_bitmap_wrapper::bitmap"]
+        [::std::mem::offset_of!(mtmd_helper_bitmap_wrapper, bitmap) - 0usize];
+    ["Offset of field: mtmd_helper_bitmap_wrapper::video_ctx"]
+        [::std::mem::offset_of!(mtmd_helper_bitmap_wrapper, video_ctx) - 8usize];
+};
+unsafe extern "C" {
+    pub fn mtmd_helper_bitmap_init_from_buf(
+        ctx: *const mtmd_context,
+        buf: *const ::std::os::raw::c_uchar,
+        len: usize,
+        placeholder: bool,
+        opt: mtmd_helper_init_opt,
+    ) -> mtmd_helper_bitmap_wrapper;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

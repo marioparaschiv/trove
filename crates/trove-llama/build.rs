@@ -10,7 +10,15 @@ const TAG: &str = "b11461";
 const COMMIT: &str = "4d756bc72bf00a4aacf410ae15a2d315f3db400d";
 const PATCH: &str = "llama.cpp-no-logits.patch";
 // The checkout is sparse: only what the library build reads (the full tree has paths too long for Windows).
-const SOURCE_FOLDERS: &[&str] = &["cmake", "ggml", "include", "licenses", "src", "vendor"];
+const SOURCE_FOLDERS: &[&str] = &[
+    "cmake",
+    "ggml",
+    "include",
+    "licenses",
+    "src",
+    "tools/mtmd",
+    "vendor",
+];
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -38,9 +46,13 @@ fn main() {
     }
 }
 
-/// A checkout from an earlier run is reused only if it is still the pinned commit with the current patch applied.
+/// A checkout from an earlier run is reused only if it is still the pinned commit with the current patch applied and
+/// every source folder checked out.
 fn is_ready(source: &Path, patch: &Path) -> bool {
     source.join(".git").is_dir()
+        && SOURCE_FOLDERS
+            .iter()
+            .all(|folder| source.join(folder).is_dir())
         && git_output(source, &["rev-parse", "HEAD"]).as_deref() == Some(COMMIT)
         && git_succeeds(source, &["apply", "--reverse", "--check", path_arg(patch)])
 }
@@ -104,7 +116,11 @@ fn base_config(source: &Path) -> cmake::Config {
         .define("LLAMA_BUILD_SERVER", "OFF")
         .define("LLAMA_BUILD_APP", "OFF")
         .define("LLAMA_BUILD_UI", "OFF")
-        .define("LLAMA_OPENSSL", "OFF");
+        .define("LLAMA_OPENSSL", "OFF")
+        // libmtmd embeds images and audio with the model's projector. Its video input runs ffmpeg, which Trove
+        // doesn't use through it.
+        .define("LLAMA_BUILD_MTMD", "ON")
+        .define("MTMD_VIDEO", "OFF");
 
     // With the Visual Studio generator the cmake crate replaces the release flags with cc's, which have no
     // optimisation, so CMake's own release flags are put back.
@@ -132,7 +148,14 @@ fn build_static_metal(source: &Path) {
         "cargo:rustc-link-search=native={}",
         install.join("lib").display()
     );
+    // libmtmd's hashing library is static and not installed, so it is linked from the build tree.
+    println!(
+        "cargo:rustc-link-search=native={}",
+        install.join("build").join("vendor").join("hash").display()
+    );
     for library in [
+        "mtmd",
+        "vendor-hash",
         "llama",
         "ggml",
         "ggml-base",
@@ -166,16 +189,18 @@ fn build_shared_with_runtime_backends(source: &Path, out_dir: &Path) {
         "cargo:rustc-link-search=native={}",
         install.join("lib").display()
     );
-    for library in ["llama", "ggml", "ggml-base"] {
+    for library in ["mtmd", "llama", "ggml", "ggml-base"] {
         println!("cargo:rustc-link-lib=dylib={library}");
     }
 
     // ggml loads its backends from the executable's folder, and Windows finds DLLs there too, so the runtime
     // libraries go beside the binaries (`target/<profile>`) and the test executables (`target/<profile>/deps`).
+    // OUT_DIR is <target>/<profile>/build/<package>-<hash>/out, or <package>/<hash>/out in Cargo's newer layout.
     let profile_dir = out_dir
         .ancestors()
-        .nth(3)
-        .expect("OUT_DIR is <target>/<profile>/build/<package>/out");
+        .find(|folder| folder.file_name().is_some_and(|name| name == "build"))
+        .and_then(Path::parent)
+        .expect("OUT_DIR is inside <target>/<profile>/build");
     let runtime_libraries = runtime_libraries(&install);
     for destination in [profile_dir.to_path_buf(), profile_dir.join("deps")] {
         for library in &runtime_libraries {
@@ -271,6 +296,12 @@ const BOUND_FUNCTIONS: &[&str] = &[
     "ggml_threadpool_params_default",
     "llama_backend_init",
     "llama_attach_threadpool",
+    "llama_batch_ext_add_embd",
+    "llama_batch_ext_add_token",
+    "llama_batch_ext_free",
+    "llama_batch_ext_init",
+    "llama_batch_ext_set_output_embd",
+    "llama_batch_ext_set_pos",
     "llama_batch_free",
     "llama_batch_init",
     "llama_context_default_params",
@@ -284,20 +315,53 @@ const BOUND_FUNCTIONS: &[&str] = &[
     "llama_model_free",
     "llama_model_get_vocab",
     "llama_model_load_from_file",
+    "llama_model_n_embd_inp",
     "llama_model_n_embd_out",
+    "llama_process",
     "llama_set_n_threads",
     "llama_tokenize",
     "llama_vocab_eos",
+    "mtmd_bitmap_free",
+    "mtmd_bitmap_get_data",
+    "mtmd_bitmap_get_n_bytes",
+    "mtmd_bitmap_init_from_audio",
+    "mtmd_bitmap_is_audio",
+    "mtmd_context_params_default",
+    "mtmd_decode_use_mrope",
+    "mtmd_default_marker",
+    "mtmd_encode_chunk",
+    "mtmd_free",
+    "mtmd_get_audio_sample_rate",
+    "mtmd_get_output_embd",
+    "mtmd_helper_bitmap_init_from_buf",
+    "mtmd_helper_init_opt_default",
+    "mtmd_helper_log_set",
+    "mtmd_init_from_file",
+    "mtmd_input_chunk_get_n_pos",
+    "mtmd_input_chunk_get_n_tokens",
+    "mtmd_input_chunk_get_tokens_text",
+    "mtmd_input_chunk_get_type",
+    "mtmd_input_chunks_free",
+    "mtmd_input_chunks_get",
+    "mtmd_input_chunks_init",
+    "mtmd_input_chunks_size",
+    "mtmd_support_audio",
+    "mtmd_support_vision",
+    "mtmd_tokenize",
 ];
 
 #[cfg(feature = "generate-bindings")]
 fn generate_bindings(source: &Path, destination: &Path) {
+    let mtmd = source.join("tools").join("mtmd");
     bindgen::Builder::default()
         .header(path_arg(&source.join("include").join("llama.h")))
+        .header(path_arg(&mtmd.join("mtmd.h")))
+        .header(path_arg(&mtmd.join("mtmd-helper.h")))
         .clang_arg(format!(
             "-I{}",
             source.join("ggml").join("include").display()
         ))
+        .clang_arg(format!("-I{}", source.join("include").display()))
         .allowlist_function(BOUND_FUNCTIONS.join("|"))
         .prepend_enum_name(false)
         .rust_edition(bindgen::RustEdition::Edition2024)

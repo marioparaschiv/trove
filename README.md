@@ -55,14 +55,14 @@ Releases cover Linux x86_64, macOS arm64 and Windows x86_64. The model runs on a
 
 1. Download `main.js` and `manifest.json` from the [latest release](https://github.com/marioparaschiv/trove/releases/latest).
 2. Put them in `<vault>/.obsidian/plugins/trove/` and enable Trove under Community plugins.
-3. On first run the plugin downloads the matching `trove` binary and checks its SHA-256. It then downloads the model (310 MB) and indexes the vault.
+3. On first run the plugin downloads the matching `trove` binary and checks its SHA-256. It then downloads the model (310 MB) with its image and audio encoders (555 MB) and indexes the vault.
 
 **CLI**
 
 Download the archive for your platform from the [latest release](https://github.com/marioparaschiv/trove/releases/latest). Unpack it and keep the libraries next to the binary.
 
 ```bash
-trove setup                      # download and verify the model
+trove setup                      # download and verify the model and its encoders
 trove sources add ~/Notes        # register a folder
 trove index                      # index it
 ```
@@ -172,6 +172,7 @@ flowchart TB
 - **GPU choice.** Integrated Vulkan GPUs are skipped: on a Ryzen iGPU the same text embedded twice drifted to cosine 0.92, and indexed slower than the CPU.
 - **Background work.** Indexing the service starts on its own uses fewer threads at below-normal priority. Searches run at full speed.
 - **Model download.** Resumes after a dropped connection, retries with backoff and verifies the SHA-256.
+- **Images and audio.** llama.cpp's libmtmd runs the model's projector (mmproj), whose encoders turn an image or audio clip into input rows for the text model. Text tokens and those rows go through the model as one batch and are mean-pooled like a text, so media vectors share the text vector space. The projector loads with the first media input and unloads with the model.
 - **Sync store.** Each source has a `.trove` folder with one fp16 vector file per note. Syncthing or Dropbox carries it to other devices, which import the vectors instead of embedding again. Sync conflict copies get cleaned up.
 - **Crash safety.** Files are written to a temporary file and renamed. A lock allows one service per data folder, and the OS releases it if the process dies.
 
