@@ -89,11 +89,15 @@ jobs:
           revision=$(pin MODEL_REVISION)
           file=$(pin MODEL_FILE)
           sha256=$(pin MODEL_SHA256)
+          mmproj_file=$(pin MMPROJ_FILE)
+          mmproj_sha256=$(pin MMPROJ_SHA256)
           {
             echo "repo=$repo"
             echo "revision=$revision"
             echo "file=$file"
             echo "sha256=$sha256"
+            echo "mmproj-file=$mmproj_file"
+            echo "mmproj-sha256=$mmproj_sha256"
             echo "hf-folder=models--${repo//\//--}"
           } >> "$GITHUB_OUTPUT"
 
@@ -102,9 +106,9 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/.cache/huggingface/hub/${{ steps.model.outputs.hf-folder }}
-          key: model-${{ runner.os }}-${{ steps.model.outputs.revision }}-${{ steps.model.outputs.file }}
+          key: model-${{ runner.os }}-${{ steps.model.outputs.revision }}-${{ steps.model.outputs.file }}-${{ steps.model.outputs.mmproj-file }}
 
-      # Same layout as `hf download`, which the embedder tests read.
+      # Same layout as `hf download`, which the embedder tests read: the model and its image and audio projector.
       - name: Download model
         if: steps.model-cache.outputs.cache-hit != 'true'
         env:
@@ -112,18 +116,24 @@ jobs:
           REVISION: ${{ steps.model.outputs.revision }}
           FILE: ${{ steps.model.outputs.file }}
           SHA256: ${{ steps.model.outputs.sha256 }}
+          MMPROJ_FILE: ${{ steps.model.outputs.mmproj-file }}
+          MMPROJ_SHA256: ${{ steps.model.outputs.mmproj-sha256 }}
           FOLDER: ${{ steps.model.outputs.hf-folder }}
         run: |
           snapshot="$HOME/.cache/huggingface/hub/$FOLDER/snapshots/$REVISION"
           mkdir -p "$snapshot"
-          curl --fail --location --retry 5 --output "$snapshot/$FILE.partial" \
-            "https://huggingface.co/$REPO/resolve/$REVISION/$FILE"
-          actual=$(openssl dgst -sha256 -r "$snapshot/$FILE.partial" | cut -d ' ' -f 1)
-          if [ "$actual" != "$SHA256" ]; then
-            echo "::error::$FILE has SHA-256 $actual, expected $SHA256"
-            exit 1
-          fi
-          mv "$snapshot/$FILE.partial" "$snapshot/$FILE"
+          download() {
+            curl --fail --location --retry 5 --output "$snapshot/$1.partial" \
+              "https://huggingface.co/$REPO/resolve/$REVISION/$1"
+            actual=$(openssl dgst -sha256 -r "$snapshot/$1.partial" | cut -d ' ' -f 1)
+            if [ "$actual" != "$2" ]; then
+              echo "::error::$1 has SHA-256 $actual, expected $2"
+              exit 1
+            fi
+            mv "$snapshot/$1.partial" "$snapshot/$1"
+          }
+          download "$FILE" "$SHA256"
+          download "$MMPROJ_FILE" "$MMPROJ_SHA256"
 
       - name: Clippy
         run: cargo clippy --locked --all-targets -- --deny warnings

@@ -12,7 +12,7 @@ use thiserror::Error;
 use trove_llama::{EmbeddingModel, LlamaError, Priority};
 use utoipa::ToSchema;
 
-pub use trove_llama::{Devices, LLAMA_CPP_TAG, has_gpu};
+pub use trove_llama::{Devices, LLAMA_CPP_TAG, Media, has_gpu};
 
 use crate::{config::Config, data_dir::DataDir, indexer::Chunker};
 
@@ -96,8 +96,20 @@ pub enum ModelEvent {
 }
 
 #[derive(Debug, Error)]
-#[error("embedding model failed")]
-pub struct EmbedderError(#[from] LlamaError);
+pub enum EmbedderError {
+    #[error("embedding model failed")]
+    Model(#[from] LlamaError),
+    #[error("no projector is set up to embed images and audio: run `trove setup`")]
+    NoProjector,
+}
+
+/// An audio file decoded for embedding in windows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedAudio {
+    /// Mono samples, which `Media::AudioSamples` takes.
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+}
 
 /// The embedding model, loaded by the first call that needs it and unloaded after `idle_timeout` without calls or on
 /// request.
@@ -107,6 +119,8 @@ pub struct Embedder {
 
 struct Shared {
     model_path: PathBuf,
+    /// The model's image and audio projector, loaded with the model by the first media call and unloaded with it.
+    projector_path: Option<PathBuf>,
     devices: Devices,
     // The same on every load: the devices and the backends llama.cpp found don't change while the process runs.
     device: OnceLock<String>,
@@ -126,9 +140,21 @@ struct State {
 }
 
 impl Embedder {
-    /// The model `trove setup` installs in `data_dir`, unloaded after the configured idle time.
+    /// The model and projector `trove setup` installs in `data_dir`, unloaded after the configured idle time.
     pub fn from_config(data_dir: &DataDir, config: &Config) -> Self {
-        Self::new(config.model.path_in(data_dir), config.model_idle_timeout)
+        let embedder = Self::new(config.model.path_in(data_dir), config.model_idle_timeout);
+        match &config.projector {
+            Some(projector) => embedder.with_projector(projector.path_in(data_dir)),
+            None => embedder,
+        }
+    }
+
+    /// Embeds images and audio with the projector at `path`, which must belong to the model.
+    pub fn with_projector(mut self, path: PathBuf) -> Self {
+        Arc::get_mut(&mut self.shared)
+            .expect("an embedder is only shared once it is built")
+            .projector_path = Some(path);
+        self
     }
 
     pub fn new(model_path: PathBuf, idle_timeout: Duration) -> Self {
@@ -139,6 +165,7 @@ impl Embedder {
         Self {
             shared: Arc::new(Shared {
                 model_path,
+                projector_path: None,
                 devices,
                 device: OnceLock::new(),
                 idle_timeout,
@@ -182,6 +209,47 @@ impl Embedder {
         state.last_used = Instant::now();
 
         Ok(vectors)
+    }
+
+    /// One unit-length vector per image or audio clip, in order, in the space text vectors share. Loads the projector
+    /// alongside the model.
+    pub fn embed_media(
+        &self,
+        media: &[Media<'_>],
+        profile: Profile,
+    ) -> Result<Vec<Vec<f32>>, EmbedderError> {
+        if media.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut state = self.shared.projector_state()?;
+        let model = state
+            .model
+            .as_mut()
+            .expect("loaded_state returns a loaded model");
+        let vectors = model.embed_media(media, profile.priority())?;
+        state.last_used = Instant::now();
+
+        Ok(vectors)
+    }
+
+    /// Decodes a WAV, MP3 or FLAC file to the samples the projector embeds. Loads the projector alongside the model.
+    pub fn decode_audio(&self, bytes: &[u8]) -> Result<DecodedAudio, EmbedderError> {
+        let mut state = self.shared.projector_state()?;
+        let model = state
+            .model
+            .as_ref()
+            .expect("loaded_state returns a loaded model");
+        let samples = model.decode_audio(bytes)?;
+        let sample_rate = model
+            .audio_sample_rate()
+            .expect("decode_audio fails without an audio encoder");
+        state.last_used = Instant::now();
+
+        Ok(DecodedAudio {
+            samples,
+            sample_rate,
+        })
     }
 
     /// The vector of a search query, made again only for a query the loaded model hasn't seen lately.
@@ -306,6 +374,22 @@ impl Shared {
         let shared = Arc::clone(self);
         thread::spawn(move || shared.unload_when_idle(generation));
         self.notify(ModelEvent::Loaded);
+
+        Ok(state)
+    }
+
+    /// The loaded model with its projector loaded too.
+    fn projector_state(self: &Arc<Self>) -> Result<MutexGuard<'_, State>, EmbedderError> {
+        let path = self
+            .projector_path
+            .as_deref()
+            .ok_or(EmbedderError::NoProjector)?;
+        let mut state = self.loaded_state()?;
+        state
+            .model
+            .as_mut()
+            .expect("loaded_state returns a loaded model")
+            .load_projector(path)?;
 
         Ok(state)
     }

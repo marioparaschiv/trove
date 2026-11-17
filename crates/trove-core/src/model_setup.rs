@@ -11,24 +11,29 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use ureq::{
     Agent,
-    config::Config as HttpConfig,
     http::{Uri, header},
     unversioned::{
-        resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver},
-        transport::{
-            Buffers, ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport,
-        },
+        resolver::DefaultResolver,
+        transport::{Connector, DefaultConnector},
     },
 };
 use utoipa::ToSchema;
 
 use crate::{config::Config, data_dir::DataDir, error::full_message};
 
+mod transport;
+
+use transport::{IdleTimeout, LookupFailedResolver};
+
 pub const MODEL_REPO: &str = "ggml-org/embeddinggemma-2-GGUF";
 pub const MODEL_REVISION: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
 pub const MODEL_FILE: &str = "embeddinggemma-2-Q8_0.gguf";
 pub const MODEL_SIZE: u64 = 309_855_456;
 pub const MODEL_SHA256: &str = "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135";
+/// The model's vision and audio encoders, from the same repository and revision as the model.
+pub const MMPROJ_FILE: &str = "mmproj-embeddinggemma-2-Q8_0.gguf";
+pub const MMPROJ_SIZE: u64 = 554_821_024;
+pub const MMPROJ_SHA256: &str = "c4a8a52691ecef40618438928bdf9e68379b854e24166f292592353db0aab64f";
 
 pub const MODELS_FOLDER: &str = "models";
 pub const HF_ENDPOINT_ENV: &str = "HF_ENDPOINT";
@@ -60,6 +65,17 @@ impl ModelFile {
             file: MODEL_FILE.to_owned(),
             size: MODEL_SIZE,
             sha256: MODEL_SHA256.to_owned(),
+        }
+    }
+
+    /// The pinned model's projector, which embeds images and audio into the model's vector space.
+    pub fn pinned_projector() -> Self {
+        Self {
+            repo: MODEL_REPO.to_owned(),
+            revision: MODEL_REVISION.to_owned(),
+            file: MMPROJ_FILE.to_owned(),
+            size: MMPROJ_SIZE,
+            sha256: MMPROJ_SHA256.to_owned(),
         }
     }
 
@@ -172,8 +188,9 @@ enum Attempt {
     Failed(TransferError),
 }
 
-/// Puts `config.model` into the data folder: copied from the Hugging Face cache when it is there, otherwise
-/// downloaded. Reports progress through `emit`, ending with `Done` or `Error`.
+/// Puts `config.model`, then `config.projector`, into the data folder: each copied from the Hugging Face cache when
+/// it is there, otherwise downloaded. Reports progress through `emit`, ending with `Done` (the model's path) or
+/// `Error`.
 pub fn setup(
     data_dir: &DataDir,
     config: &Config,
@@ -196,7 +213,20 @@ fn install(
     config: &Config,
     emit: &mut dyn FnMut(Event),
 ) -> Result<PathBuf, SetupError> {
-    let model = &config.model;
+    let path = install_file(data_dir, config, &config.model, emit)?;
+    if let Some(projector) = &config.projector {
+        install_file(data_dir, config, projector, emit)?;
+    }
+
+    Ok(path)
+}
+
+fn install_file(
+    data_dir: &DataDir,
+    config: &Config,
+    model: &ModelFile,
+    emit: &mut dyn FnMut(Event),
+) -> Result<PathBuf, SetupError> {
     let path = model.path_in(data_dir);
     let folder = data_dir.path().join(MODELS_FOLDER);
     fs::create_dir_all(&folder).map_err(|source| io_error("create", &folder, source))?;
@@ -235,7 +265,7 @@ fn install(
             bytes: model.size,
             from: Source::Download,
         });
-        download(config, &model.url(&endpoint), &partial, emit)?;
+        download(config, model, &model.url(&endpoint), &partial, emit)?;
     }
 
     fs::rename(&partial, &path).map_err(|source| io_error("rename", &partial, source))?;
@@ -291,11 +321,11 @@ fn hf_endpoint() -> Result<String, SetupError> {
 
 fn download(
     config: &Config,
+    model: &ModelFile,
     url: &str,
     partial: &Path,
     emit: &mut dyn FnMut(Event),
 ) -> Result<(), SetupError> {
-    let model = &config.model;
     let retry_delay = config.download_retry_delay;
     let agent = Agent::with_parts(
         Agent::config_builder()
@@ -552,87 +582,6 @@ fn is_offline(error: &TransferError) -> bool {
                 | io::ErrorKind::NetworkDown
         ),
         _ => false,
-    }
-}
-
-/// ureq reports a failed lookup as a plain I/O error, indistinguishable from a failed connection.
-#[derive(Debug)]
-struct LookupFailedResolver(DefaultResolver);
-
-impl Resolver for LookupFailedResolver {
-    fn resolve(
-        &self,
-        uri: &Uri,
-        config: &HttpConfig,
-        timeout: NextTimeout,
-    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
-        match self.0.resolve(uri, config, timeout) {
-            Err(ureq::Error::Io(_)) => Err(ureq::Error::HostNotFound),
-            result => result,
-        }
-    }
-}
-
-/// Fails any wait for data longer than the idle timeout, so a stalled transfer becomes a retry instead of a hang.
-/// ureq's own timeouts only bound whole phases of a request.
-#[derive(Debug)]
-struct IdleTimeout(Duration);
-
-impl<In: Transport> Connector<In> for IdleTimeout {
-    type Out = IdleTransport<In>;
-
-    fn connect(
-        &self,
-        _: &ConnectionDetails,
-        chained: Option<In>,
-    ) -> Result<Option<Self::Out>, ureq::Error> {
-        Ok(chained.map(|inner| IdleTransport {
-            inner,
-            idle: self.0,
-        }))
-    }
-}
-
-#[derive(Debug)]
-struct IdleTransport<T> {
-    inner: T,
-    idle: Duration,
-}
-
-impl<T: Transport> Transport for IdleTransport<T> {
-    fn buffers(&mut self) -> &mut dyn Buffers {
-        self.inner.buffers()
-    }
-
-    fn transmit_output(&mut self, amount: usize, timeout: NextTimeout) -> Result<(), ureq::Error> {
-        self.inner.transmit_output(amount, timeout)
-    }
-
-    fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
-        if *timeout.after <= self.idle {
-            return self.inner.await_input(timeout);
-        }
-
-        let idle = NextTimeout {
-            after: self.idle.into(),
-            reason: timeout.reason,
-        };
-
-        match self.inner.await_input(idle) {
-            Err(ureq::Error::Timeout(_)) => Err(ureq::Error::Io(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("no data for {}", humantime::format_duration(self.idle)),
-            ))),
-            result => result,
-        }
-    }
-
-    fn is_open(&mut self) -> bool {
-        self.inner.is_open()
-    }
-
-    fn is_tls(&self) -> bool {
-        self.inner.is_tls()
     }
 }
 

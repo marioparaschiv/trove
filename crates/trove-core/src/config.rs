@@ -24,6 +24,9 @@ pub struct Config {
     pub download_idle_timeout: Duration,
     /// The model `trove setup` installs. Defaults to the pinned EmbeddingGemma 2 file.
     pub model: ModelFile,
+    /// The model's image and audio projector, which `trove setup` installs beside it. Defaults to the pinned model's;
+    /// a configured `model` has none unless `projector` is configured too, since a projector only fits its model.
+    pub projector: Option<ModelFile>,
 }
 
 impl Default for Config {
@@ -36,6 +39,7 @@ impl Default for Config {
             download_retry_delay: Duration::from_secs(2),
             download_idle_timeout: Duration::from_secs(60),
             model: ModelFile::pinned(),
+            projector: Some(ModelFile::pinned_projector()),
         }
     }
 }
@@ -72,6 +76,7 @@ struct RawConfig {
     download_retry_delay: Option<String>,
     download_idle_timeout: Option<String>,
     model: Option<RawModel>,
+    projector: Option<RawModel>,
 }
 
 /// Every field is required: a model is identified by all of them together.
@@ -100,6 +105,11 @@ impl Config {
         })?;
 
         let defaults = Self::default();
+        let projector = match raw.projector {
+            Some(projector) => Some(model_file(&path, projector, &PROJECTOR_FIELDS)?),
+            None if raw.model.is_some() => None,
+            None => defaults.projector,
+        };
 
         Ok(Self {
             model_idle_timeout: timeout(
@@ -137,9 +147,10 @@ impl Config {
                 defaults.download_idle_timeout,
             )?,
             model: match raw.model {
-                Some(model) => model_file(&path, model)?,
+                Some(model) => model_file(&path, model, &MODEL_FIELDS)?,
                 None => defaults.model,
             },
+            projector,
         })
     }
 }
@@ -199,7 +210,32 @@ fn store_folder(path: &Path, name: String) -> Result<String, ConfigError> {
     Err(invalid(path, "store_folder", reason))
 }
 
-fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
+/// The names a model table's fields have in errors.
+struct ModelFields {
+    repo: &'static str,
+    revision: &'static str,
+    file: &'static str,
+    size: &'static str,
+    sha256: &'static str,
+}
+
+const MODEL_FIELDS: ModelFields = ModelFields {
+    repo: "model.repo",
+    revision: "model.revision",
+    file: "model.file",
+    size: "model.size",
+    sha256: "model.sha256",
+};
+
+const PROJECTOR_FIELDS: ModelFields = ModelFields {
+    repo: "projector.repo",
+    revision: "projector.revision",
+    file: "projector.file",
+    size: "projector.size",
+    sha256: "projector.sha256",
+};
+
+fn model_file(path: &Path, raw: RawModel, fields: &ModelFields) -> Result<ModelFile, ConfigError> {
     let is_name_char = |char: char| char.is_ascii_alphanumeric() || "._-".contains(char);
     let is_name = |name: &str| {
         !name.is_empty() && name != "." && name != ".." && name.chars().all(is_name_char)
@@ -214,7 +250,7 @@ fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
     if !matches!(raw.repo.split_once('/'), Some((owner, name)) if is_name(owner) && is_name(name)) {
         return Err(invalid(
             path,
-            "model.repo",
+            fields.repo,
             format!("{:?} is not an `owner/name` repository", raw.repo),
         ));
     }
@@ -222,7 +258,7 @@ fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
     if !is_lower_hex(&raw.revision, 40) {
         return Err(invalid(
             path,
-            "model.revision",
+            fields.revision,
             format!(
                 "{:?} is not a 40-character lowercase hex commit",
                 raw.revision
@@ -233,7 +269,7 @@ fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
     if !is_name(&raw.file) {
         return Err(invalid(
             path,
-            "model.file",
+            fields.file,
             format!("{:?} is not a plain file name", raw.file),
         ));
     }
@@ -241,7 +277,7 @@ fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
     if raw.size == 0 {
         return Err(invalid(
             path,
-            "model.size",
+            fields.size,
             "must be greater than zero".to_owned(),
         ));
     }
@@ -249,7 +285,7 @@ fn model_file(path: &Path, raw: RawModel) -> Result<ModelFile, ConfigError> {
     if !is_lower_hex(&raw.sha256, 64) {
         return Err(invalid(
             path,
-            "model.sha256",
+            fields.sha256,
             format!(
                 "{:?} is not a 64-character lowercase hex SHA-256",
                 raw.sha256
