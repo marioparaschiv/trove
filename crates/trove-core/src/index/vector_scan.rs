@@ -403,11 +403,9 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_file_of_another_precision_or_dimensions_is_written_again() {
-        let temp = tempfile::tempdir().unwrap();
-        let data_dir = DataDir::at(temp.path().to_owned()).unwrap();
-        let mut index = Index::open(&data_dir).unwrap();
+    /// An index of one note with two chunks, along the first and second axis.
+    fn two_chunk_index(data_dir: &DataDir) -> Index {
+        let index = Index::open(data_dir).unwrap();
         index
             .connection()
             .execute_batch(
@@ -428,8 +426,49 @@ mod tests {
                 .unwrap();
         }
 
+        index
+    }
+
+    fn query_along_first_axis() -> Vec<f32> {
         let mut query = vec![0.0; DIMS];
         query[0] = 1.0;
+
+        query
+    }
+
+    #[test]
+    fn the_file_is_written_again_while_it_is_mapped() {
+        let temp = tempfile::tempdir().unwrap();
+        let data_dir = DataDir::at(temp.path().to_owned()).unwrap();
+        let mut index = two_chunk_index(&data_dir);
+        let query = query_along_first_axis();
+        assert_eq!(
+            index.vector_scan().unwrap().scores(&query).unwrap().len(),
+            2
+        );
+
+        // Written again by a search after the index changed, and by an index run, each with the old file mapped.
+        index
+            .connection()
+            .execute("DELETE FROM chunks WHERE id = 2", [])
+            .unwrap();
+        assert_eq!(
+            index.vector_scan().unwrap().scores(&query).unwrap(),
+            [(1, 1.0)]
+        );
+        index.rebuild_vector_scan().unwrap();
+        assert_eq!(
+            index.vector_scan().unwrap().scores(&query).unwrap(),
+            [(1, 1.0)]
+        );
+    }
+
+    #[test]
+    fn a_file_of_another_precision_or_dimensions_is_written_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let data_dir = DataDir::at(temp.path().to_owned()).unwrap();
+        let mut index = two_chunk_index(&data_dir);
+        let query = query_along_first_axis();
         let scores = index.vector_scan().unwrap().scores(&query).unwrap();
         assert_eq!(scores, [(1, 1.0), (2, 0.0)]);
         drop(index);

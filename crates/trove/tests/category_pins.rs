@@ -8,8 +8,9 @@ use serde_json::{Value, json};
 /// In the sail handling category, which the navigation category is merged into.
 const POINTS_OF_SAIL: &str = "Sailing/Points of sail.md";
 const CHART_NAVIGATION: &str = "Sailing/Chart navigation.md";
-/// In the bread category, and moved by hand to the cheese category.
-const MOZZARELLA: &str = "Cheese/Mozzarella stretching.md";
+/// In the bread category, and moved by hand to the cheese category. Its sections are far below the semantic edge floor
+/// to every cheese note, so the small differences in embeddings between platforms can't move it there first.
+const DUTCH_OVEN: &str = "Bread/Baking in a dutch oven.md";
 const RENNET: &str = "Cheese/Rennet and curds.md";
 /// A sailing note added after the pins.
 const HEAVING_TO: &str = "Sailing/Heaving to.md";
@@ -72,7 +73,7 @@ fn assert_pins_hold(response: &Value) {
         .collect();
     assert!(other_sailing.is_empty(), "{response:#}");
 
-    let cheese = category_of(response, MOZZARELLA);
+    let cheese = category_of(response, DUTCH_OVEN);
     assert_eq!(cheese["name"], "Cheese", "{response:#}");
     assert_eq!(category_of(response, RENNET)["name"], "Cheese");
     assert!(cheese["parent"].is_null(), "{response:#}");
@@ -88,7 +89,7 @@ fn pinned_renames_moves_and_merges_hold_after_later_runs_and_on_another_device()
     let navigation = category_of(&before, CHART_NAVIGATION);
     assert_ne!(sail_handling["id"], navigation["id"], "{before:#}");
     let cheese = category_of(&before, RENNET);
-    assert_ne!(category_of(&before, MOZZARELLA)["id"], cheese["id"]);
+    assert_ne!(category_of(&before, DUTCH_OVEN)["id"], cheese["id"]);
 
     // Renaming the sail handling category, as the plugin sends it when its category note is renamed.
     let sail_handling_notes = members(&before, sail_handling);
@@ -114,7 +115,7 @@ fn pinned_renames_moves_and_merges_hold_after_later_runs_and_on_another_device()
     let mut merged = sail_handling_notes.clone();
     merged.extend(members(&before, navigation));
     let mut cheese_notes = members(&before, cheese);
-    cheese_notes.insert(MOZZARELLA.to_owned());
+    cheese_notes.insert(DUTCH_OVEN.to_owned());
     pin(
         &serve,
         vault.path(),
@@ -126,7 +127,7 @@ fn pinned_renames_moves_and_merges_hold_after_later_runs_and_on_another_device()
                 "replaces": [navigation["name"]],
             },
             { "type": "category", "name": "Cheese", "notes": cheese_notes },
-            { "type": "note", "path": MOZZARELLA, "category": "Cheese" },
+            { "type": "note", "path": DUTCH_OVEN, "category": "Cheese" },
             { "type": "parent", "category": "Cheese", "parent": null },
         ]),
     );
