@@ -7,11 +7,12 @@ use utoipa::ToSchema;
 
 use super::{Index, IndexError};
 
-/// A registered folder that Trove indexes.
+/// A registered folder or single file that Trove indexes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Source {
     pub id: i64,
-    /// Absolute path of the folder on this device.
+    /// Absolute path of the folder or file on this device. Note paths are relative to the folder, or for a file to the
+    /// folder holding it.
     pub path: String,
 }
 
@@ -21,8 +22,8 @@ pub enum SourceError {
     NotAbsolute(PathBuf),
     #[error("source path must be valid Unicode, got {0:?}")]
     NotUnicode(PathBuf),
-    #[error("{0:?} is not a folder")]
-    NotAFolder(PathBuf),
+    #[error("{0:?} is not a folder or a file")]
+    NotAFolderOrFile(PathBuf),
     #[error("{0:?} is already a source")]
     AlreadyAdded(String),
     #[error("{0:?} is not a source")]
@@ -63,11 +64,11 @@ impl Index {
             .optional()
     }
 
-    /// Registers the folder at `path`, which must be absolute.
+    /// Registers the folder or file at `path`, which must be absolute.
     pub fn add_source(&mut self, path: &Path) -> Result<Source, SourceError> {
         let path = normalised(path)?;
-        if !Path::new(&path).is_dir() {
-            return Err(SourceError::NotAFolder(path.into()));
+        if !(Path::new(&path).is_dir() || Path::new(&path).is_file()) {
+            return Err(SourceError::NotAFolderOrFile(path.into()));
         }
 
         let inserted = self.conn.query_row(
@@ -87,7 +88,7 @@ impl Index {
         }
     }
 
-    /// Unregisters the folder at `path`, which must be absolute, and drops everything indexed from it.
+    /// Unregisters the folder or file at `path`, which must be absolute, and drops everything indexed from it.
     pub fn remove_source(&mut self, path: &Path) -> Result<Source, SourceError> {
         let path = normalised(path)?;
         let id = self
@@ -101,6 +102,15 @@ impl Index {
             .ok_or_else(|| SourceError::NotFound(path.clone()))?;
 
         Ok(Source { id, path })
+    }
+}
+
+/// The folder a source's note paths are relative to, which also holds its store folder: the source itself, or the
+/// folder holding a file source.
+pub fn source_root(source: &Path) -> &Path {
+    match source.parent() {
+        Some(parent) if source.is_file() => parent,
+        _ => source,
     }
 }
 

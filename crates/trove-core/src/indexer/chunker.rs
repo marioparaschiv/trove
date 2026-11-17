@@ -3,7 +3,7 @@ use std::{ops::Range, sync::Arc};
 use rusqlite::Transaction;
 use sha2::{Digest, Sha256};
 
-use super::{FileProcessor, IndexerError, NoteFile, frontmatter::Frontmatter};
+use super::{FileProcessor, Format, IndexerError, NoteFile, frontmatter::Frontmatter};
 use crate::{
     embedder::{CONTEXT_TOKENS, Embedder, Input},
     index::keyword_text,
@@ -12,7 +12,7 @@ use crate::{
 const HEADING_SEPARATOR: &str = " > ";
 
 /// Splits a note into one chunk per heading section, and a section too long for the model's context into chunks of
-/// whole paragraphs, then writes `chunks` and `chunks_fts`. Counting tokens loads the model, so a
+/// whole paragraphs, then writes. A plain text file is one section without a heading. Writes `chunks` and `chunks_fts`. Counting tokens loads the model, so a
 /// note whose chunks the sync store holds takes them from there.
 pub struct Chunker {
     embedder: Arc<Embedder>,
@@ -70,7 +70,17 @@ impl Chunker {
 
     fn split(&self, note: &NoteFile<'_>) -> Result<Vec<Chunk>, IndexerError> {
         let mut chunks = Vec::new();
-        for section in sections(note.text) {
+        let sections = match note.format {
+            Format::Markdown => sections(note.text),
+            Format::PlainText => trimmed(note.text, 0..note.text.len())
+                .map(|span| Section {
+                    heading_path: String::new(),
+                    span,
+                })
+                .into_iter()
+                .collect(),
+        };
+        for section in sections {
             let title = document_title(note.title, &section.heading_path);
             for (span, token_count) in self.fit(note.text, &title, section.span)? {
                 chunks.push(Chunk {

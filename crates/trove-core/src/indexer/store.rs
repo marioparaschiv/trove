@@ -9,12 +9,13 @@ use rusqlite::{OptionalExtension, Transaction};
 use sha2::{Digest, Sha256};
 
 use super::{
-    IndexProblem, IndexReport, Indexer, IndexerError, NoteFile, neighbours::update_graph_edges,
+    Format, IndexProblem, IndexReport, Indexer, IndexerError, NoteFile,
+    neighbours::update_graph_edges,
 };
 use crate::{
     config::Config,
     embedder::{Embedder, vector_version},
-    index::{self, Index},
+    index::{self, Index, source_root},
     sync_store::{StoredChunk, SyncStore, VectorFile, vector_file_name},
 };
 
@@ -177,7 +178,7 @@ pub fn import_vector_files(
     let mut report = IndexReport::default();
 
     for source in &sources {
-        let root = Path::new(&source.path);
+        let root = source_root(Path::new(&source.path));
         let names: HashSet<String> = paths
             .iter()
             .filter_map(|path| arrived_name(path, root, &config.store_folder))
@@ -304,6 +305,7 @@ fn import_note(
             id: note.id,
             title: &note.title,
             text: &text,
+            format: Format::of(&note.path),
             stored_chunks: Some(chunks),
         },
     )?;

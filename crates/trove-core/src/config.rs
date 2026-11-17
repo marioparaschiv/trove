@@ -18,6 +18,8 @@ pub struct Config {
     pub service_idle_timeout: Duration,
     pub index_debounce: Duration,
     pub store_folder: String,
+    /// Files larger than this many bytes are not indexed.
+    pub max_file_size: u64,
     /// The first wait between download retries; later ones double up to a minute.
     pub download_retry_delay: Duration,
     /// How long a download may wait for data before the attempt counts as failed and is retried.
@@ -33,6 +35,7 @@ impl Default for Config {
             service_idle_timeout: Duration::from_secs(15 * 60),
             index_debounce: Duration::from_secs(30),
             store_folder: ".trove".to_owned(),
+            max_file_size: 5_000_000,
             download_retry_delay: Duration::from_secs(2),
             download_idle_timeout: Duration::from_secs(60),
             model: ModelFile::pinned(),
@@ -69,6 +72,7 @@ struct RawConfig {
     service_idle_timeout: Option<String>,
     index_debounce: Option<String>,
     store_folder: Option<String>,
+    max_file_size: Option<String>,
     download_retry_delay: Option<String>,
     download_idle_timeout: Option<String>,
     model: Option<RawModel>,
@@ -124,6 +128,10 @@ impl Config {
                 Some(name) => store_folder(&path, name)?,
                 None => defaults.store_folder,
             },
+            max_file_size: match raw.max_file_size {
+                Some(size) => file_size(&path, &size)?,
+                None => defaults.max_file_size,
+            },
             download_retry_delay: timeout(
                 &path,
                 "download_retry_delay",
@@ -175,6 +183,47 @@ fn timeout(
     }
 
     Ok(duration)
+}
+
+/// A size such as `"5MB"`, `"512 KiB"` or `"1000"` (bytes), in bytes.
+fn file_size(path: &Path, value: &str) -> Result<u64, ConfigError> {
+    const UNITS: &[(&str, u64)] = &[
+        ("", 1),
+        ("b", 1),
+        ("kb", 1_000),
+        ("mb", 1_000_000),
+        ("gb", 1_000_000_000),
+        ("kib", 1 << 10),
+        ("mib", 1 << 20),
+        ("gib", 1 << 30),
+    ];
+
+    let trimmed = value.trim();
+    let split = trimmed
+        .find(|char: char| !char.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    let (number, unit) = trimmed.split_at(split);
+    let unit = unit.trim().to_ascii_lowercase();
+    let size = number.parse::<u64>().ok().and_then(|number| {
+        UNITS
+            .iter()
+            .find(|(name, _)| *name == unit)
+            .and_then(|(_, scale)| number.checked_mul(*scale))
+    });
+
+    match size {
+        Some(0) => Err(invalid(
+            path,
+            "max_file_size",
+            "must be greater than zero".to_owned(),
+        )),
+        Some(size) => Ok(size),
+        None => Err(invalid(
+            path,
+            "max_file_size",
+            format!("{value:?} is not a size such as \"5MB\""),
+        )),
+    }
 }
 
 /// The store folder syncs between devices, so its name must be valid on every OS.

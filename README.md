@@ -4,7 +4,7 @@
 
 <h1>Trove</h1>
 
-<b>Local semantic search for your notes.</b>
+<b>Local semantic search for your notes and text files.</b>
 
 Search an Obsidian vault by meaning, see related notes and get link suggestions. Everything runs on your machine with a local embedding model.
 
@@ -28,7 +28,7 @@ Search an Obsidian vault by meaning, see related notes and get link suggestions.
 
 ### What Is Trove?
 
-Trove indexes folders of Markdown notes and searches them by words and by meaning. The query "how to keep my bread culture alive" finds a note called `Sourdough starter`, though they share no words.
+Trove indexes folders of Markdown notes and other text files, and searches them by words and by meaning. The query "how to keep my bread culture alive" finds a note called `Sourdough starter`, though they share no words.
 
 It is a single Rust binary that embeds notes with [EmbeddingGemma](https://huggingface.co/ggml-org/embeddinggemma-2-GGUF) on [llama.cpp](https://github.com/ggml-org/llama.cpp). It needs no API key and sends nothing anywhere. Your notes stay on your machine.
 
@@ -63,7 +63,7 @@ Download the archive for your platform from the [latest release](https://github.
 
 ```bash
 trove setup                      # download and verify the model
-trove sources add ~/Notes        # register a folder
+trove sources add ~/Notes        # register a folder, or a single text file
 trove index                      # index it
 ```
 
@@ -102,6 +102,7 @@ model_idle_timeout = "3m"
 service_idle_timeout = "15m"
 index_debounce = "30s"
 store_folder = ".trove"
+max_file_size = "5MB"            # larger files are skipped; also KB, GB, KiB, MiB, GiB
 ```
 
 ## For Developers
@@ -150,7 +151,7 @@ flowchart TB
         Embedder --> Index
     end
 
-    Vault[("<b>Vault</b><br/>Markdown + .trove store")]
+    Vault[("<b>Sources</b><br/>Markdown, text + .trove store")]
 
     Clients -->|Bearer token| API
     Watcher -->|notify| Vault
@@ -166,13 +167,14 @@ flowchart TB
     style Service fill:transparent,stroke:#bbbbc0,stroke-width:2px
 ```
 
-- **Chunking.** One chunk per heading section. A long section splits at paragraph boundaries to fit a 2048-token context. Identical texts embed once.
+- **Sources.** A source is a folder or a single file. A folder walk skips hidden entries and whatever `.gitignore` and `.ignore` files exclude. `.md` files are Markdown notes. Any other file is plain text if it is valid UTF-8 with no NUL byte in its first 8 KB. Images, audio and video are skipped for now.
+- **Chunking.** One chunk per heading section. A long section splits at paragraph boundaries to fit a 2048-token context. A plain text file is one section without headings, links, tags or frontmatter. Identical texts embed once.
 - **Vector versioning.** `vector_version` hashes the model file, the llama.cpp tag, the prompts and the chunker version. Vectors from different setups never mix.
 - **llama.cpp.** Built from source at a pinned tag, with a patch that skips logits for embedding models. That saves 1 MiB per token with Gemma's 262k vocabulary.
 - **GPU choice.** Integrated Vulkan GPUs are skipped: on a Ryzen iGPU the same text embedded twice drifted to cosine 0.92, and indexed slower than the CPU.
 - **Background work.** Indexing the service starts on its own uses fewer threads at below-normal priority. Searches run at full speed.
 - **Model download.** Resumes after a dropped connection, retries with backoff and verifies the SHA-256.
-- **Sync store.** Each source has a `.trove` folder with one fp16 vector file per note. Syncthing or Dropbox carries it to other devices, which import the vectors instead of embedding again. Sync conflict copies get cleaned up.
+- **Sync store.** Each source has a `.trove` folder with one fp16 vector file per note. A file source keeps it in the folder that holds the file. Syncthing or Dropbox carries it to other devices, which import the vectors instead of embedding again. Sync conflict copies get cleaned up.
 - **Crash safety.** Files are written to a temporary file and renamed. A lock allows one service per data folder, and the OS releases it if the process dies.
 
 | Crate                                      | What it is                                                             |

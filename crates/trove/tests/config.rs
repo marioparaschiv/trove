@@ -9,6 +9,9 @@ fn invalid_config_values_fail_naming_the_field() {
         ("store_folder = \"sync/trove\"\n", "`store_folder`"),
         ("store_folder = \"\"\n", "`store_folder`"),
         ("store_dir = \".trove\"\n", "`store_dir`"),
+        ("max_file_size = \"lots\"\n", "`max_file_size`"),
+        ("max_file_size = \"5 parsecs\"\n", "`max_file_size`"),
+        ("max_file_size = \"0MB\"\n", "`max_file_size`"),
     ];
 
     for (config, field) in cases {

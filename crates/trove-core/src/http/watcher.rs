@@ -18,7 +18,7 @@ use crate::{
 
 pub(super) type Changes = mpsc::UnboundedReceiver<notify::Result<notify::Event>>;
 
-/// Watches the source folders for changes to index.
+/// Watches the sources for changes to index.
 pub(super) struct Watcher(Mutex<Inner>);
 
 struct Inner {
@@ -28,7 +28,11 @@ struct Inner {
 
 struct Root {
     source: PathBuf,
-    /// The paths events may name the folder by: as registered, and resolved (macOS reports `/var/...` as
+    /// The folder watched: the source, or the folder holding a file source.
+    watched: PathBuf,
+    /// The name of a file source in `watched`.
+    file: Option<PathBuf>,
+    /// The paths events may name the watched folder by: as registered, and resolved (macOS reports `/var/...` as
     /// `/private/var/...`).
     spellings: Vec<PathBuf>,
 }
@@ -48,11 +52,20 @@ impl Watcher {
         Ok((Self(Mutex::new(inner)), changes))
     }
 
-    /// Watches a source folder. One that can't be watched is reported on stderr and still indexed by other runs.
+    /// Watches a source. A file source is watched through the folder holding it, since editors often save by
+    /// replacing the file. One that can't be watched is reported on stderr and still indexed by other runs.
     pub(super) fn watch(&self, source: &str) {
         let source = PathBuf::from(source);
+        let (watched, file, mode) = match (source.parent(), source.file_name()) {
+            (Some(folder), Some(name)) if source.is_file() => (
+                folder.to_path_buf(),
+                Some(PathBuf::from(name)),
+                RecursiveMode::NonRecursive,
+            ),
+            _ => (source.clone(), None, RecursiveMode::Recursive),
+        };
         let mut inner = self.inner();
-        if let Err(error) = inner.watcher.watch(&source, RecursiveMode::Recursive) {
+        if let Err(error) = inner.watcher.watch(&watched, mode) {
             eprintln!(
                 "warning: can't watch {}: {}",
                 source.display(),
@@ -61,26 +74,38 @@ impl Watcher {
             return;
         }
 
-        let mut spellings = vec![source.clone()];
+        let mut spellings = vec![watched.clone()];
         // Without the resolved spelling, events under it still count as changes, just without filtering.
-        if let Ok(resolved) = fs::canonicalize(&source)
-            && resolved != source
+        if let Ok(resolved) = fs::canonicalize(&watched)
+            && resolved != watched
         {
             spellings.push(resolved);
         }
-        inner.roots.push(Root { source, spellings });
+        inner.roots.push(Root {
+            source,
+            watched,
+            file,
+            spellings,
+        });
     }
 
     pub(super) fn unwatch(&self, source: &str) {
         let source = Path::new(source);
         let mut inner = self.inner();
-        let watched = inner.roots.len();
-        inner.roots.retain(|root| root.source != source);
-        if inner.roots.len() == watched {
+        let Some(position) = inner.roots.iter().position(|root| root.source == source) else {
+            return;
+        };
+        let root = inner.roots.remove(position);
+        // Other file sources in the same folder still need it watched.
+        if inner
+            .roots
+            .iter()
+            .any(|other| other.watched == root.watched)
+        {
             return;
         }
 
-        if let Err(error) = inner.watcher.unwatch(source) {
+        if let Err(error) = inner.watcher.unwatch(&root.watched) {
             eprintln!(
                 "warning: can't stop watching {}: {}",
                 source.display(),
@@ -151,25 +176,35 @@ enum Touches {
 
 impl Inner {
     fn classify(&self, path: &Path, store_folder: &str) -> Touches {
-        let Some(relative) = self
-            .roots
-            .iter()
-            .flat_map(|root| &root.spellings)
-            .find_map(|root| path.strip_prefix(root).ok())
-        else {
-            return Touches::Notes;
-        };
-        if vector_file_name(relative, store_folder).is_some() {
-            return Touches::VectorFile;
+        let mut under_a_root = false;
+        for root in &self.roots {
+            let Some(relative) = root
+                .spellings
+                .iter()
+                .find_map(|spelling| path.strip_prefix(spelling).ok())
+            else {
+                continue;
+            };
+            under_a_root = true;
+            if vector_file_name(relative, store_folder).is_some() {
+                return Touches::VectorFile;
+            }
+
+            let touches_notes = match &root.file {
+                Some(file) => relative == file,
+                None => !relative.components().any(|component| match component {
+                    Component::Normal(name) => name
+                        .to_str()
+                        .is_some_and(|name| name.starts_with('.') || name == store_folder),
+                    _ => false,
+                }),
+            };
+            if touches_notes {
+                return Touches::Notes;
+            }
         }
 
-        let hidden = relative.components().any(|component| match component {
-            Component::Normal(name) => name
-                .to_str()
-                .is_some_and(|name| name.starts_with('.') || name == store_folder),
-            _ => false,
-        });
-        if hidden {
+        if under_a_root {
             Touches::Nothing
         } else {
             Touches::Notes
